@@ -28,12 +28,16 @@ CXXFLAGS := \
 	$(DEFINES) \
 	$(EXT_USER_ARGS) \
 	-Iinclude \
+	-I/opt/local/include \
+	-I/Users/mlozanov/Documents/boost \
         -fexceptions \
         -frtti \
 
 LDFLAGS := \
 	$(EXT_LLVM_LDFLAGS) \
 	$(PLATFORM_LDFLAGS) \
+	-L/opt/local/lib \
+	-L/Users/mlozanov/Documents/boost/stage/lib \
 
 extempore: $(OBJFILES)
 	@echo + ld $(LDFLAGS) -o $@ $(OBJFILES) $(LIBS)
