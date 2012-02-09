@@ -87,6 +87,7 @@ class UNIV {
     
     public:
 	static uint32_t CHANNELS;
+	static uint32_t IN_CHANNELS;
 	static uint32_t SAMPLERATE;
 	static uint64_t TIME;
 	static uint64_t DEVICE_TIME;
@@ -96,6 +97,8 @@ class UNIV {
 	static uint32_t FRAMES;
 	static const char* PWD;
         static uint32_t EXT_TERM;
+        static uint32_t AUDIO_DEVICE;
+
 
 	static double midi2frq(double pitch);
 	static double frqRatio(double semitones);
