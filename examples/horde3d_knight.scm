@@ -5,6 +5,7 @@
 ;; This example is pulled pretty much straight off the
 ;; Knight example that comes with Horde3D.
 ;;
+;; Also demonstrates running opengl rendering in secondary process
 ;; 
 ;; NOTE!:
 ;; a) You will need to load the horde3d_lib.scm to bind to Horde3D
@@ -13,6 +14,8 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; first load libfile
+(load "libs/horde3d_lib.scm")
 
 ;; globals
 (bind-val _knight i32 0)
@@ -87,7 +90,7 @@
       (set! particleSysRes (h3dAddResource H3DResTypes_SceneGraph "particles/particleSys1/particleSys1.scene.xml" 0))
 
       ;; load resources
-      (if (h3dutLoadResourcesFromDisk "/home/andrew/Documents/models/Horde3D")
+      (if (h3dutLoadResourcesFromDisk "Horde3D")
 	  (printf "succesfully loaded resouces\n")
 	  (printf "failed to load resources\n"))
 
@@ -138,16 +141,16 @@
       1)))
 
 
+
 (definec mainLoop
-  (let ((_at 0.0)
-	(fps:float 30.0))
-    (lambda ()
+  (let ((fps:float 30.0))
+    (lambda (_at:double)
       (set! _curFPS fps)
       (h3dSetOption H3DOptions_DebugViewMode 0.0)
       (h3dSetOption H3DOptions_WireframeMode 0.0)
       (set! _at (+ _at 0.025))
       
-      (h3dSetModelAnimParams _knight 0 (* (dtof _at) 24.0) 24.0) ;_weight)
+      (h3dSetModelAnimParams _knight 0 (* (dtof (* 0.5 _at)) 24.0) 24.0) ;_weight)     
       
       (let ((cnt (h3dFindNodes _particleSys "" H3DNodeTypes_Emitter))
 	    (i 0))
@@ -159,17 +162,17 @@
       	(dotimes (i3 cnt3)
       	  (h3dAdvanceEmitterTime (h3dGetNodeFindResult i3) (/ 1.0 _curFPS))))
 
-      (h3dSetNodeTransform light 7.0 15.0 20.0
+      (h3dSetNodeTransform light 4.0 9.0 3.0
 			         -60.0 0.0  0.0
 				 1.0  1.0  1.0)
 
       (h3dSetNodeTransform _cam
-			   (+ (* 30.0 (dtof (cos (* 1.0 _at)))) 0.0)
+			   (+ (* 25.0 (dtof (cos (* 0.25 _at)))) 0.0)
 			   5.0
-			   (+ (* 30.0 (dtof (sin (* 1.0 _at)))) 0.0)
+			   (+ (* 25.0 (dtof (sin (* 0.25 _at)))) 0.0)
 			   0.0
-			   (dtof (* 57.295791 (atan2 (cos (* 1.0 _at))
-						     (sin (* 1.0 _at)))))
+			   (dtof (* 57.295791 (atan2 (cos (* 0.25 _at))
+						     (sin (* 0.25 _at)))))
 			   0.0
 			   1.0 1.0 1.0)
       (h3dRender _cam)
@@ -179,16 +182,33 @@
       1)))
 
 
-
 ;; standard impromptu callback
 (define opengl-test
-  (lambda (time degree)
-    (mainLoop)
+  (lambda (beat dur)
+    (if (< (*metro* beat) (now))
+    	(println 'opengl-test-behind (- (*metro* beat) (now))))
+    (mainLoop beat)
     (gl:swap-buffers pr2)
-    (callback (+ time 100) 'opengl-test (+ time 1000) (+ degree 0.01))))
+    (callback (*metro* (+ beat (* dur .125))) 'opengl-test (+ beat dur) dur)))
 
 
-(define pr2 (gl:make-ctx ":0.0" #f 0.0 0.0 1024.0 768.0))
-(h3d_init)
-(resize 1024.0 768.0)
-(opengl-test (now) 0.0)
+(define start
+  (lambda ()
+    (println 'starting)
+    (eval '(define pr2 (gl:make-ctx ":0.0" #f 0.0 0.0 900.0 600.0))
+	  (interaction-environment))
+    (h3d_init)
+    (resize 900.0 600.0)
+    (opengl-test (*metro* 'get-beat 4) 1/12)))
+
+
+;; setup new process
+(let ((proc "opengl"))
+  (ipc:new proc 7095)  
+  (sys:sleep 11025)
+  (ipc:definec proc 'mainLoop)
+  (ipc:definec proc 'h3d_init)
+  (ipc:definec proc 'resize)
+  (ipc:define proc 'opengl-test opengl-test)
+  (ipc:define proc 'start start)
+  (ipc:call-async proc 'start))
