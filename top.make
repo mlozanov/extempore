@@ -30,8 +30,8 @@ CXXFLAGS := \
 	-Iinclude \
 	-I/opt/local/include \
 	-I/Users/mlozanov/Documents/boost \
-        -fexceptions \
-        -frtti \
+    -fexceptions \
+    -frtti \
 
 LDFLAGS := \
 	$(EXT_LLVM_LDFLAGS) \
