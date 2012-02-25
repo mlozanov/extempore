@@ -9,7 +9,9 @@
 ;; load soil library
 (define soillib (if (string=? "Linux" (sys:platform))
 		    (sys:open-dylib "libSOIL.so.1")
-		    (sys:open-dylib "soil.dll")))
+		    (if (string=? "OSX" (sys:platform))
+				(sys:open-dylib "libs/libSOIL.so.1")
+				(sys:open-dylib "soil.dll"))))
 
 
 (bind-lib soillib SOIL_load_OGL_texture [i32,i8*,i32,i32,i32]*)
