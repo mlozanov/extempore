@@ -28,6 +28,7 @@ CXXFLAGS := \
 	$(DEFINES) \
 	$(EXT_USER_ARGS) \
 	-Iinclude \
+	-I/Users/mlozanov/Documents/llvm/build/include \
 	-I/opt/local/include \
 	-I/Users/mlozanov/Documents/boost \
     -fexceptions \
@@ -37,6 +38,7 @@ LDFLAGS := \
 	$(EXT_LLVM_LDFLAGS) \
 	$(PLATFORM_LDFLAGS) \
 	-L/opt/local/lib \
+	-I/Users/mlozanov/Documents/llvm/build/lib \
 	-L/Users/mlozanov/Documents/boost/stage/lib \
 
 extempore: $(OBJFILES)
