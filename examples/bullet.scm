@@ -47,10 +47,10 @@
 (definec h3d_object_size
   (lambda (idx:i32)
     (let ((sizes (heap-alloc 6 float))
-	  (results (heap-alloc 3 float)))
+		  (results (heap-alloc 3 float)))
       (h3dGetNodeAABB (pref _objects idx)
-		      (pref-ptr sizes 0) (pref-ptr sizes 1) (pref-ptr sizes 2)
-		      (pref-ptr sizes 3) (pref-ptr sizes 4) (pref-ptr sizes 5))
+					  (pref-ptr sizes 0) (pref-ptr sizes 1) (pref-ptr sizes 2)
+					  (pref-ptr sizes 3) (pref-ptr sizes 4) (pref-ptr sizes 5))
       (pset! results 0 (- (pref sizes 3) (pref sizes 0)))
       (pset! results 1 (- (pref sizes 4) (pref sizes 1)))
       (pset! results 2 (- (pref sizes 5) (pref sizes 2)))
@@ -59,34 +59,34 @@
 (definec h3d_object_pos
   (lambda (idx:i32)
     (let ((sizes (heap-alloc 6 float))
-	  (results (heap-alloc 3 float)))
+		  (results (heap-alloc 3 float)))
       (h3dGetNodeAABB (pref _objects idx)
-		      (pref-ptr sizes 0) (pref-ptr sizes 1) (pref-ptr sizes 2)
-		      (pref-ptr sizes 3) (pref-ptr sizes 4) (pref-ptr sizes 5))
+					  (pref-ptr sizes 0) (pref-ptr sizes 1) (pref-ptr sizes 2)
+					  (pref-ptr sizes 3) (pref-ptr sizes 4) (pref-ptr sizes 5))
       (pset! results 0 (pref sizes 0))
       (pset! results 1 (pref sizes 1))
       (pset! results 2 (pref sizes 2))
       results)))
-      
+
 (definec h3d_init
   (let ((hand -1)
-	(matRes -1)
-	(envRes -1)
-	(boxRes -1)
-	(boxAnim1Res -1)
-	(boxAnim2Res -1)
-	(particleSysRes -1)
-	(phySdk (plNewBulletSdk))
-	(dynWorld (plCreateDynamicsWorld phySdk))
-	(iii:i64 0)
-	(z:i32 0)
-	(k:i64 0)
-	)
+		(matRes -1)
+		(envRes -1)
+		(boxRes -1)
+		(boxAnim1Res -1)
+		(boxAnim2Res -1)
+		(particleSysRes -1)
+		(phySdk (plNewBulletSdk))
+		(dynWorld (plCreateDynamicsWorld phySdk))
+		(iii:i64 0)
+		(z:i32 0)
+		(k:i64 0)
+		)
     (lambda ()
       (if (h3dInit)
-	  (printf "Successfully Inited Horde3D\n")
-	  (begin (h3dutDumpMessages)
-		 (printf "Failed to init Horde3D\n")))
+		  (printf "Successfully Inited Horde3D\n")
+		  (begin (h3dutDumpMessages)
+				 (printf "Failed to init Horde3D\n")))
       ;; set options
       (h3dSetOption H3DOptions_LoadTextures 1)
       (h3dSetOption H3DOptions_TexCompression 0)
@@ -103,8 +103,8 @@
 
       ;; load resources
       (if (h3dutLoadResourcesFromDisk "Horde3D")
-	  (printf "succesfully loaded resouces\n")
-	  (printf "failed to load resources\n"))
+		  (printf "succesfully loaded resouces\n")
+		  (printf "failed to load resources\n"))
 
       ;; log any errors to Horde3D_Log.html
       (h3dutDumpMessages)                  
@@ -113,49 +113,49 @@
       (set! _cam (h3dAddCameraNode H3DRootNode "Camera" _forwardPipeRes)) ;_hdrPipeRes))
 
       (let ((resy (h3dAddNodes H3DRootNode boxRes)))
-	(h3dSetNodeTransform resy -500.0 0.0 0.0
-			     0.0 0.0 0.0
-			     1000.0 1000.0 0.1))
+		(h3dSetNodeTransform resy -500.0 0.0 0.0
+							 0.0 0.0 0.0
+							 1000.0 1000.0 0.1))
       ;; add boxes
       (dotimes (iii 2000)
-	(let ((res (h3dAddNodes H3DRootNode boxRes)))
-	  (h3dSetNodeTransform res
-			       0.0 0.0 0.0
-			       0.0 0.0 0.0
-			       1.0 1.0 1.0)	  
-	  (pset! _objects iii res)))
+			   (let ((res (h3dAddNodes H3DRootNode boxRes)))
+				 (h3dSetNodeTransform res
+									  0.0 0.0 0.0
+									  0.0 0.0 0.0
+									  1.0 1.0 1.0)	  
+				 (pset! _objects iii res)))
 
       ;; move objects
       (let ((v3 (heap-alloc 3 float))
-	    (across 40)
-	    (v4 (heap-alloc 4 float)))
-	(dotimes (z (i64toi32 2000))
-	  (let ((body (plCreateRigidBody null 1.0 (plNewBoxShape 1.0 1.0 1.0))))
-	    (plSetActivationState body 4)	    
-	    (pset! _bodies z body)
-	    (pfill! v3 (* 5.0 (i32tof (modulo z across))) (* 5.0 (i32tof (/ (modulo z 2000) across))) 0.0) ;(dtof (- (* 2.0 (random)) 1.0)))
-	    (plSetPosition body v3)
-	    (plSetEuler 0.0 0.0 0.0 v4)
-	    (plSetOrientation body v4)
-	    (plAddRigidBody dynWorld body))))
+			(across 40)
+			(v4 (heap-alloc 4 float)))
+		(dotimes (z (i64toi32 2000))
+				 (let ((body (plCreateRigidBody null 1.0 (plNewBoxShape 1.0 1.0 1.0))))
+				   (plSetActivationState body 4)	    
+				   (pset! _bodies z body)
+				   (pfill! v3 (* 5.0 (i32tof (modulo z across))) (* 5.0 (i32tof (/ (modulo z 2000) across))) 0.0) ;(dtof (- (* 2.0 (random)) 1.0)))
+				   (plSetPosition body v3)
+				   (plSetEuler 0.0 0.0 0.0 v4)
+				   (plSetOrientation body v4)
+				   (plAddRigidBody dynWorld body))))
 
       (let ((v33 (heap-alloc 3 float))
-	    (v44 (heap-alloc 4 float)))
-	(dotimes (k 5)
-	  (let ((stiffbody (plCreateRigidBody null 0.0 (plNewBoxShape 10.0 10.0 1000.0))))
-	    (pset! _sbodies k stiffbody)
-	    (pfill! v33 (+ 30.0 (* (i64tof k) 40.0)) 20.0 200.0)
-	    (pfill! v44 0.0 0.0 0.0 1.0)
-	    (plSetPosition stiffbody v33)
-	    (plSetOrientation stiffbody v44)
-	    (plAddRigidBody dynWorld stiffbody))))
+			(v44 (heap-alloc 4 float)))
+		(dotimes (k 5)
+				 (let ((stiffbody (plCreateRigidBody null 0.0 (plNewBoxShape 10.0 10.0 1000.0))))
+				   (pset! _sbodies k stiffbody)
+				   (pfill! v33 (+ 30.0 (* (i64tof k) 40.0)) 20.0 200.0)
+				   (pfill! v44 0.0 0.0 0.0 1.0)
+				   (plSetPosition stiffbody v33)
+				   (plSetOrientation stiffbody v44)
+				   (plAddRigidBody dynWorld stiffbody))))
       
       
       ;; add light source
       (set! light (h3dAddLightNode H3DRootNode "Light1" 0 "LIGHTING" "SHADOWMAP"))
       (h3dSetNodeTransform light 0.0 0.0 10.0
-			         0.0 0.0 0.0
-				 1.0 1.0 1.0)
+						   0.0 0.0 0.0
+						   1.0 1.0 1.0)
       (h3dSetNodeParamF light H3DLight_RadiusF 0 1000.0)
       (h3dSetNodeParamF light H3DLight_FovF 0 90.0)
       (h3dSetNodeParamI light H3DLight_ShadowMapCountI 1)
@@ -172,40 +172,40 @@
 
 (definec mainLoop
   (let ((_at:double 0.0)
-	(matrix (heap-alloc 16 float))
-	(pos (heap-alloc 3 float))
-	(fps:float 30.0)
-	(z:i32 0)
-	(k 0))
+		(matrix (heap-alloc 16 float))
+		(pos (heap-alloc 3 float))
+		(fps:float 30.0)
+		(z:i32 0)
+		(k 0))
     (lambda ()     
       (set! _curFPS fps)
       (h3dSetOption H3DOptions_DebugViewMode 0.0)
       (h3dSetOption H3DOptions_WireframeMode 0.0)
-           
+	  
       ;; step simulation
       (set! _at (+ _at 0.03))
       (pfill! pos 0.0 -2000.0 0.0)
       (plSetGravity (h3d_init.dynWorld:plDynamicsWorldHandle) pos)
       (plStepSimulation (h3d_init.dynWorld:plDynamicsWorldHandle) 1.0 1 (/ 1.0 260.0)) ;(dtof _at))
 
-;      (pfill! pos (+ 60.0 (* 50.0 (dtof (cos (* _at .25))))) 20.0 200.0)
- ;     (plSetPosition (pref _sbodies 0) pos))
+										;      (pfill! pos (+ 60.0 (* 50.0 (dtof (cos (* _at .25))))) 20.0 200.0)
+										;     (plSetPosition (pref _sbodies 0) pos))
       (pfill! pos _x _y 200.0)
       (plSetPosition (pref _sbodies 4) pos)
 
       (dotimes (z (i64toi32 2000))
-      	(plGetPosition (pref _bodies z) pos)
-      	(plGetOpenGLMatrix (pref _bodies z) matrix)
-      	(h3dSetNodeTransMat (pref _objects z) matrix)	
-      	(if (< (pref pos 1) -30.0)
-      	    (let ((body (pref _bodies z)))	      
-      	      (pfill! pos (* 4.0 (i32tof (modulo z 40))) 90.0 0.0) ;(* 3.0 (dtof (random))))
-      	      (plSetPosition body pos)
-      	      (pfill! pos 0.0 -100.0 0.0)
-      	      (plSetLinearVelocity body pos)
-      	      (pfill! pos 0.0 0.0 0.0)
-      	      (plSetAngularVelocity body pos)
-      	      (plClearForces body))))
+			   (plGetPosition (pref _bodies z) pos)
+			   (plGetOpenGLMatrix (pref _bodies z) matrix)
+			   (h3dSetNodeTransMat (pref _objects z) matrix)	
+			   (if (< (pref pos 1) -30.0)
+				   (let ((body (pref _bodies z)))	      
+					 (pfill! pos (* 4.0 (i32tof (modulo z 40))) 90.0 0.0) ;(* 3.0 (dtof (random))))
+					 (plSetPosition body pos)
+					 (pfill! pos 0.0 -100.0 0.0)
+					 (plSetLinearVelocity body pos)
+					 (pfill! pos 0.0 0.0 0.0)
+					 (plSetAngularVelocity body pos)
+					 (plClearForces body))))
 
       ;; some lighting guff
       (h3dSetNodeParamF light H3DLight_RadiusF 0 300.0)
@@ -218,9 +218,9 @@
       (h3dSetNodeParamF light H3DLight_ColorMultiplierF 0 1.0)
 
       (h3dSetNodeTransform light
-      			   85.0 150.0 50.0
-      			   -90.0 -45.0 0.0
-      			   1.0 1.0 1.0)
+						   85.0 150.0 50.0
+						   -90.0 -45.0 0.0
+						   1.0 1.0 1.0)
 
       (h3dSetNodeTransform _cam 90.0 30.0 400.0 0.0 0.0 0.0 1.0 1.0 1.0)      
       (h3dRender _cam)
@@ -243,8 +243,8 @@
   (lambda (time degree)
     (let ((c (clock:clock)))
       (let ((evt (gl:get-event)))
-	(if (not (null? evt))
-	    (set-mouse-pos (cadr evt) (car evt))))
+		(if (not (null? evt))
+			(set-mouse-pos (cadr evt) (car evt))))
       (mainLoop)
       (gl:swap-buffers pr2)
       (callback (+ time 50) 'opengl-test (+ time 512) (+ degree 0.001)))))
