@@ -1,2 +1,3 @@
 extempore
 config/llvm.bash
+libs/libSOIL.so.1
