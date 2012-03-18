@@ -520,7 +520,7 @@
       ;; otherwise we have a problem
       (if (and (> (length types) 1)
                (not (apply = (map length types))))
-          (print-error 'Compiler 'Error: 'bad 'complex 'type 'in types)
+          (print-error 'Compiler 'Error: 'un-even 'type 'error 'for 'sym: sym 'types: types)
           (map (lambda (ts)
                   ;(print 'ts: ts)
                   (let ((ttt (if (list? ts)
@@ -2429,8 +2429,7 @@
 			      (ascii-print-color 0 7 10)
 			      (print " >>> ")
 			      (ascii-print-color 1 3 10)
-			      (print (string->sexpr (impc:ir:pretty-print-type (impc:ir:get-type-str (cons (+ *impc:ir:closure* *impc:ir:pointer* *impc:ir:pointer*)
-													   ftype)))))
+			      (print (string->symbol (impc:ir:pretty-print-type (impc:ir:get-type-str (cons (+ *impc:ir:closure* *impc:ir:pointer* *impc:ir:pointer*) ftype)))))
 			      (ascii-print-color 0 7 10)
 			      (print)))))
             (cadr (impc:ir:gname))))))
