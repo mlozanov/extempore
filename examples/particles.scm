@@ -16,7 +16,7 @@
 
 (definec load-tex
   (lambda (id)
-    (let ((t (gl-load-tex "Horde3D/textures/particles/star.png" id)))      
+    (let ((t (gl-load-tex "/Users/mlozanov/Documents/extempore/Horde3D/textures/particles/particle1.tga" id)))      
       (set! texture1 t))))
 
 ;; 0 meaning load texture into new id

@@ -8,13 +8,13 @@
 		     (sys:open-dylib "libHorde3D.so")
 		     (if (string=? "Windows" (sys:platform))
 			 (sys:open-dylib "Horde3D.dll")
-			 (sys:open-dylib "Horde3D.framework/Horde3D"))))
+			 (sys:open-dylib "/Users/mlozanov/Documents/Horde3D/build/Horde3D/Source/Horde3DEngine/Horde3D.framework/Horde3D"))))
 
 (define hordeutlib (if (string=? "Linux" (sys:platform))
 		       (sys:open-dylib "libHorde3DUtils.so")
 		       (if (string=? "Windows" (sys:platform))
 			   (sys:open-dylib "Horde3DUtils.dll")
-			   (sys:open-dylib "Horde3DUtils.framework/Horde3DUtils"))))
+			   (sys:open-dylib "/Users/mlozanov/Documents/Horde3D/build/Horde3D/Source/Horde3DUtils//Horde3DUtils.framework/Horde3DUtils"))))
 
 
 (bind-lib hordelib h3dInit [i1]*)
@@ -56,6 +56,8 @@
 (bind-lib hordeutlib h3dutLoadResourcesFromDisk [i1,i8*]*)
 (bind-lib hordeutlib h3dutCreateGeometryRes [i32,i8*,i32,i32,float*,i32*,i32*,i32*,i32*,float*,float*]*)
 (bind-lib hordeutlib h3dutScreenshot [i1,i8*]*)
+(bind-lib hordeutlib h3dutGetResourcePath [i8*,i32]*)
+(bind-lib hordeutlib h3dutSetResourcePath [void,i32,i8*]*)
 					     
 ;; global contants
 

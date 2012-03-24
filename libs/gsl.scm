@@ -7,8 +7,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define gsllib (if (string=? "Linux" (sys:platform))
-		   (sys:open-dylib "libgsl.so.0")
-		   (print-error "tell me where to find the gsl dynamic library on your platform here!")))
+				   (sys:open-dylib "libgsl.so.0")
+				   (if (string=? "OSX" (sys:platform))
+					   (sys:open-dylib "libgsl.dylib")
+					   (print-error "tell me where to find the gsl dynamic library on your platform here!"))))
 
 
 ;; SOME TYPES FOR GSL

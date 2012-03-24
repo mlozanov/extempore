@@ -30,6 +30,7 @@ CXXFLAGS := \
 	-Iinclude \
 	-I/Users/mlozanov/Documents/llvm/build/include \
 	-I/usr/local/include \
+	-I/opt/local/include \
     -fexceptions \
     -frtti \
 
@@ -37,6 +38,7 @@ LDFLAGS := \
 	$(EXT_LLVM_LDFLAGS) \
 	$(PLATFORM_LDFLAGS) \
 	-L/usr/local/lib \
+	-L/opt/local/lib \
 	-I/Users/mlozanov/Documents/llvm/build/lib \
 
 extempore: $(OBJFILES)

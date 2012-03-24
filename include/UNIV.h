@@ -40,8 +40,14 @@
 #include "SchemePrivate.h"
 
 #ifdef EXT_BOOST
+#pragma push_macro("nil")
+#pragma push_macro("Nil")
+#undef nil
+#undef Nil
 #include <boost/random.hpp>
 #include <boost/random/mersenne_twister.hpp>
+#pragma pop_macro("Nil")
+#pragma pop_macro("nil") 
 #endif
 
 #include <string>
