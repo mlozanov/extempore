@@ -11,6 +11,7 @@
 (require 'scheme)
 
 (defvar extempore-keydef "\C-x\C-x")     ; key sequence to send a definition
+(defvar extempore-keydef-alt "\f7")
 (defvar extempore-keyreg "\C-x\C-r")     ; key sequence to send a region
 (defvar extempore-port 7099)             ; TCP port to Extempore
 (defvar extempore-process nil)           ; process during TCP connection
@@ -75,6 +76,7 @@
 (defun extempore-connect (host port)     ; start connection to Extempore
   (interactive "sHostname: \nnPort: ")
   (define-key scheme-mode-map extempore-keydef 'extempore-send-definition)
+  (define-key scheme-mode-map extempore-keydef-alt 'extempore-send-definition)
   (define-key scheme-mode-map extempore-keyreg 'extempore-send-region)
   (if (not (null extempore-process))
       (delete-process extempore-process))

@@ -160,7 +160,7 @@
 	      (set-cdr! v (cons type (cdr v))))
 	  (set! *impc:ti:vtypes* (cons (list name type) *impc:ti:vtypes*)))
       (ascii-print-color 0 7 10)
-      (print "Successfull appended type variable ")
+      (print "Appended type variable ")
       (ascii-print-color 1 2 10)
       (print name)
       (ascii-print-color 0 7 10)
@@ -190,6 +190,7 @@
     (let* ((atypes (cdr (impc:ti:get-var-types ast)))
 	   (types (map (lambda (v) (impc:ti:vtypes (cdr v))) atypes))
 	   (rest (cl:remove #f types)))
+      ;(println 'atypes: atypes 'types: types 'rest: rest)
       (if (> (length rest) 0) #t #f))))
 
 (define impc:ti:force-vtypes
@@ -236,7 +237,7 @@
 							    (map (lambda (t)
 								   (symbol->string t))
 								 r))))
-				   (nameandhash (string-append name (number->string hash))))
+				   (nameandhash (string-append name "--" (number->string hash))))
 			      (cons (string->symbol name) (string->symbol nameandhash))))
 			  combinations)))
       (list (map (lambda (n) (cdr n)) newnames)
@@ -250,6 +251,7 @@
 
 (define impc:ti:parametric-poly-pass
   (lambda (ast)
+    ;(println 'impc:ti:parametric-poly-pass)
     (if (not (impc:ti:check-for-vtypes ast))
 	(eval ast (interaction-environment)) ;; if not generic func compile normally
 	(let* ((storeprint print) ;; set print to nothing but store original as storeprint
@@ -284,7 +286,7 @@
 	  (if (> (length (cl:remove '() (cl:remove #f res))) 0)
 	      (begin
 		(ascii-print-color 0 7 10)
-		(print 'Successfully 'compiled 'generic 'function )
+		(print 'Compiled 'generic 'function )
 		(ascii-print-color 1 2 10)
 		(print "" name)
 		(ascii-print-color 0 7 10)
@@ -519,6 +521,14 @@
 		 (cdr ast)
 		 (make-list-with-proc (length ast) (lambda (i) i))))))
 
+(define impc:ti:vfill!
+  (lambda (ast)
+    (append '(begin)
+	    (map (lambda (arg idx)
+		   (list 'vset! (car ast) idx arg))
+		 (cdr ast)
+		 (make-list-with-proc (length ast) (lambda (i) i))))))
+
 (define *unique-polynum* 0)
 
 (define impc:ti:first-transform
@@ -526,12 +536,15 @@
       ;(println inbody? 'transforming-ast: ast)
       (if (null? ast) '()
           (cond ((list? ast)
-                 (cond ((impc:ir:poly-types (car ast))
-			(set! *unique-polynum* (+ 1 *unique-polynum*))
-			(cons (string->symbol (string-append (symbol->string (car ast))
-							     "$$$"
-							     (number->string *unique-polynum*)))
-			      (impc:ti:first-transform (cdr ast) inbody?)))
+                 (cond ((or (impc:ir:poly-types (car ast))
+			    (impc:ir:gpoly-types (car ast)))
+			;; (and (impc:ir:poly-types (car ast))
+			;;     (not (impc:ir:gpoly-types (car ast))))
+		  	(set! *unique-polynum* (+ 1 *unique-polynum*))
+		  	(cons (string->symbol (string-append (symbol->string (car ast))
+		  					     "##" ;"$$$"
+		  					     (number->string *unique-polynum*)))
+		  	      (impc:ti:first-transform (cdr ast) inbody?)))
 		       ((eq? (car ast) 'and) 
                         (impc:ti:first-transform (impc:ti:and (cdr ast)) inbody?))
                        ((eq? (car ast) 'random)
@@ -548,6 +561,8 @@
 			(impc:ti:first-transform (impc:ti:pfill! (cdr ast)) inbody?))
 		       ((eq? (car ast) 'tfill!)
 			(impc:ti:first-transform (impc:ti:tfill! (cdr ast)) inbody?))
+		       ((eq? (car ast) 'vfill!)
+			(impc:ti:first-transform (impc:ti:vfill! (cdr ast)) inbody?))
                        ((eq? (car ast) 'or) 
                         (impc:ti:first-transform (impc:ti:or (cdr ast)) inbody?))
                        ((eq? (car ast) 'free) 
@@ -563,7 +578,7 @@
                         (impc:ti:first-transform (impc:ti:not (cadr ast)) inbody?))
                        ;; ((eq? (car ast) 'list)
                        ;;  (impc:ti:first-transform (impc:ti:binary-arity (cons 'mcons (append (cdr ast) '(nilnil))) inbody?) inbody?))
-		       ((and (member (car ast) '(* - / + bitwise-and bitwise-or bitwise-eor bitwise-shift-left bitwise-shift-right))
+		       ((and (member (car ast) '(* - / + % bitwise-and bitwise-or bitwise-eor bitwise-shift-left bitwise-shift-right))
                              (<> (length ast) 3))
                         (impc:ti:first-transform (impc:ti:binary-arity ast inbody?) inbody?))
 		       ((eq? (car ast) 'bitwise-not)
@@ -636,7 +651,9 @@
 			    ((eq? ast 'now) 'llvm_now)
 			    ((eq? ast 'pset!) 'pointer-set!)
 			    ((eq? ast 'pref) 'pointer-ref)
-			    ((eq? ast 'pref-ptr) 'pointer-ref-ptr)			    
+			    ((eq? ast 'pref-ptr) 'pointer-ref-ptr)
+			    ((eq? ast 'vset!) 'vector-set!)
+			    ((eq? ast 'vref) 'vector-ref)			    
 			    ((eq? ast 'aset!) 'array-set!)
 			    ((eq? ast 'aref) 'array-ref)
 			    ((eq? ast 'aref-ptr) 'array-ref-ptr)
@@ -659,6 +676,93 @@
 ;;
 ;;
 
+
+;; is 't' a complex type?
+(define impc:ti:complex-type?
+  (lambda (t)
+    (if (atom? t) #f
+	(if (and (number? (car t))           ;; if list starts with a number (i.e. not a symbol)
+		 (<> (car t) *impc:ir:void*) ;; if not void
+		 (> (modulo (car t) *impc:ir:pointer*) 10)) ;; if proper complex type (tuple,array,closure)
+	    #t
+	    #f))))
+
+;; this will ...
+;; 1. try to unify the generic type (vs) using (vars)
+;; 2. check against specifications of the polytype that may already exist
+;; 3. if 2. exists then return the typename of the specification of the generic type
+;; 4. if 2. does not exist then create specific type, add it to type polys and return it
+;; 5. if type cannot be unified throw compiler error.
+(define impc:ti:symbol-expand-generic-type
+  (lambda (vs vars all-vs)
+    ;(println 'generic-type-in: vs 'vars: vars 'allvs: all-vs)
+    (let* ((rsplit1 (regex:split (symbol->string vs) "##")) ;\\$\\$\\$"))
+	   (gnum (if (> (length rsplit1) 1) (cadr rsplit1) #f))
+	   (rsplit2 (regex:split (car rsplit1) "(%)|(\\*)"))
+	   (gpolyname (car rsplit2))
+	   (spec (if (> (length rsplit2) 1) (cadr rsplit2) #f))
+	   (ptrdepth (impc:ir:get-ptr-depth (car rsplit1)))
+	   (t1 (symbol->string (impc:ir:gpolytype-types (string->symbol (impc:ir:get-base-type gpolyname))))))
+
+      ;(println '@@@@@t1: t1 'spec: spec 'gnum: gnum)
+      (for-each (lambda (v)
+		  ;; if v is not unified then unify it before proceding!
+		  ;(println 'vs: vs 'v1: v 'spec: spec 'gnum: gnum)
+		  ;(set! v (cons (car v) (impc:ti:type-unify (cdr v) vars)))
+		  ;(println 'v2: v)		  
+		  
+		  (if (and (regex:match? (symbol->string (car v)) "!")
+			   (if (not spec) #t
+			       (regex:match? (symbol->string (car v)) (string-append "%" spec)))
+			   (if (not gnum) #t
+			       (regex:match? (symbol->string (car v)) (string-append "##" gnum))) ;\\$\\$\\$" gnum)))
+			   (regex:match? t1 (car (regex:split (symbol->string (car v)) "(##)|(%)"))) ;(\\$\\$\\$)|(%)")))
+			   (not (null? (cdr v))))		      
+		      (let* ((t (impc:ti:type-unify (cdr v) vars))
+			     ;(tl (impc:ir:get-type-str t))
+			     (tl (impc:ir:pretty-print-type t)))
+			;(println 'tl: tl)
+			(set! t1 (regex:replace t1 (car (regex:split (symbol->string (car v)) "(##)|(%)")) tl)))
+		      #f))
+		vars)
+      ;(println '------ vs 't2: t1)
+      ;(println '---------- 't22: (impc:ti:type-unify (impc:ir:get-type-from-pretty-str t1) vars))
+      (if (string? t1) (set! t1 (string->symbol t1)))     
+      ;(println 'aaaa: (regex:replace (symbol->string t1) (string-append gpolyname "([^-][^-])") "$1")) ;  "[^-][^-]") " "))
+      (if (impc:ir:type? (impc:ir:get-type-from-pretty-str (regex:replace (symbol->string t1) (string-append gpolyname "([^-][^-])") "$1")))
+	  (let* ((t2 (symbol->string t1))
+		 (base (impc:ir:get-base-type gpolyname)) ;(symbol->string vs)))
+		 (newname (string-append base "--" (number->string (string-hash t2))))
+		 ;(l (println 'newname: newname))
+		 (newtype1 (regex:replace t2 (string-append base "([^-][^-])") (string-append newname "$1")))
+		 ;(ll (println 'newtype1: newtype1))
+		 (newtype2 (impc:ti:type-unify (impc:ir:get-type-from-pretty-str newtype1 (apply string-append newname (make-list-with-proc ptrdepth (lambda (kk) "*")))) vars))
+		 ;(lll (println 'newtype2: newtype2))
+		 ;(newtype3 (impc:ir:get-type-str newtype2 (apply string-append newname (make-list-with-proc ptrdepth (lambda (kk) "*"))))))
+		 ;;
+		 ;; we should do a type normalize but we CAN'T include newname
+		 ;; because we haven't added it to LLVM
+		 (newtype3 (impc:ir:get-type-str
+			    (map (lambda (ttt)
+					;(println 'ttt: ttt)
+				   (if (and (string? ttt)
+					    (regex:match? ttt newname))
+				       ttt
+				       (impc:ti:type-normalize ttt)))
+				 newtype2))))	    
+	    ;(println 'newtype2: newtype2 'newtype3: newtype3 'newname: newname)
+	    
+	    ;; ok now we have a type we need to add it to llvm and polytype
+	    (llvm:compile (string-append "%" newname " = type " newtype3))
+	    ;; next we should try to normalize the newtype
+	    (let* ((newtype4 (impc:ti:type-normalize (impc:ir:get-type-from-str (apply string-append newtype3 (make-list-with-proc ptrdepth (lambda (kk) "*"))))))
+		   (newtype5 (impc:ir:get-type-str newtype4)))
+	      ;(println 'newtype3: newtype3 'newtype4: newtype4 'newtype5: newtype5)
+	      (impc:ir:add-polytype (string->symbol base) (string->symbol newname) (string->symbol newtype5))
+	      newtype4))
+	  vs))))
+
+
 ;; takes types with symbols and expands them
 ;; using types associated with symbols in vars
 ;; if a particular var doesn't have a type yet
@@ -667,38 +771,45 @@
 ;; and assign those values into vars)
 (define impc:ti:symbol-expand
    (lambda (vs vars all-vs)
+      ;(println 'symbol-expand: vs) ; 'vars: vars)
+      ;(println 'all-vs: all-vs)
       (if (atom? vs)
           (if (symbol? vs)
-              (if (not (assoc vs vars)) 
-                  (print-error 'Compiler 'Error: 'variable 'not 'marked 'as 'free! vs)
-                  ;; check to see a type has been defined
-                  ;; otherwise return null
-                  (let ((t (cdr (assoc vs vars)))) 
-                     ;; first check to see if he symbol vs has a value                     
-                     (if (null? t) ;; if it doesn't we might need to reverse match!
-                         (let* ((positions (map (lambda (x)
-                                                   (if (atom? x)
-                                                       (print-error 'Compiler 'Error: 'severe 'type 'error: 'have 'you 'specified 'an 'incorrect 'type?)
-                                                       (cl:position vs x)))
-                                                all-vs))
-                                (position (cl:find-if number? positions))
-                                (values (if position
-                                            (map (lambda (x)
-                                                    (list-ref x position))
-                                                 all-vs)
-                                            '()))
-                                (value (cl:find-if impc:ir:type? values)))
-                            ;; if we found a value force it into vars
-                            (if value (impc:ti:force-var vs vars '() value))
-                            ;(if value (print-notification 'backward 'assigning value 'to vs))
-                            (if value
-                                value
-                                t))
-                         t))) ;; else if symbol does have a value then return it
-              vs)
-          (cons (impc:ti:symbol-expand (car vs) vars all-vs)
-                (impc:ti:symbol-expand (cdr vs) vars all-vs)))))
-
+	      (if (impc:ir:gpolytype-types (string->symbol (impc:ir:get-base-type (car (regex:split (car (regex:split (symbol->string vs) "##")) "%"))))) ;"\\$\\$\\$")) "%")))))
+		  (impc:ti:symbol-expand-generic-type vs vars all-vs)		  
+		  (if (not (assoc vs vars)) ;; if not in vars
+		      (if (regex:match? (symbol->string vs) "^![^#]*$") ;; then check to see if symbol is a !gvar
+			  vs
+			  (print-error 'Compiler 'Error: 'variable 'not 'marked 'as 'free! (symbol->string vs) 'check 'the 'variable 'name 'in 'the 'polytype))
+		      ;; check to see a type has been defined
+		      ;; otherwise return null
+		      (let ((t (cdr (assoc vs vars))))
+			;; first check to see if the symbol vs has a value                     
+			(if (null? t) ;; if it doesn't we might need to reverse match!
+			    (let* ((positions (map (lambda (x)
+						     (if (atom? x)
+							 (print-error 'Compiler 'Error: 'severe 'type 'error: 'have 'you 'specified 'an 'incorrect 'type? x)
+							 (cl:position vs x)))
+						   all-vs))
+				   (position (cl:find-if number? positions))
+				   (values (if position
+					       (map (lambda (x)
+						      (list-ref x position))
+						    all-vs)
+					       '()))
+				   (value (cl:find-if impc:ir:type? values)))
+			      ;; if we found a value force it into vars
+			      (if value (impc:ti:update-var vs vars '() value))
+			      ;(if value (impc:ti:force-var vs vars '() value))
+			      ;(if value (print-notification 'backward 'assigning value 'to vs))
+			      (if value
+				  value
+				  vs)) ;; replace with 't' to go back!!
+  			    t)))) ;; else if symbol does have a value then return it
+	      (begin ;(println 'ccc: vs)
+		vs))
+	  (cons (impc:ti:symbol-expand (car vs) vars all-vs)
+		(impc:ti:symbol-expand (cdr vs) vars all-vs)))))
 
 
 ;; impc:ti:intersection* is cl:intersection for 
@@ -709,7 +820,8 @@
    (lambda args
       (let loop ((a args)
                  (res '()))
-         (if (null? a) res
+         (if (null? a)
+	     res
              (loop (cdr a) 
                    (if (null? res)
                        (car a)
@@ -717,73 +829,550 @@
                            res
                            (cl:intersection (car a) res))))))))
 
+;; (define impc:ti:intersection*   
+;;    (lambda args
+;;      (let ((result (let loop ((a args)
+;; 			      (res '()))
+;; 		     (if (null? a)
+;; 			 res
+;; 			 (loop (cdr a) 
+;; 			       (if (null? res)
+;; 				   (car a)
+;; 				   (if (null? (car a))
+;; 				       res
+;; 				       (cl:intersection (car a) res))))))))
+;;        ;(println 'result: result)
+;;        (if (and (list? result)
+;; 		(= (length result) 1)		
+;; 		(number? (car result))		
+;; 		(<> (car result) *impc:ir:void*)
+;; 		(> (modulo (car result) *impc:ir:pointer*) 10))
+;; 	   '()
+;; 	   result))))
+
+
+;; (define impc:ti:complex-unify
+;;   (lambda (sym types)
+;;     ;(println 'complex:unify: 'sym: sym 'types: types)
+;;     ;; next do a sanity check
+;;     (if (cl:find-if (lambda (x) (not (list? x))) types)
+;; 	(apply print-error 'Compiler 'Error: 'bad 'type: (symbol->string sym) 'invalid 'mixed 'type 'definitions: types))
+;;     ;; first check that all complex types
+;;     ;; are the same length
+;;     ;; otherwise we have a problem
+;;     (if (and (> (length types) 1)
+;; 	     (not (apply = (map length types))))
+;; 	(print-error 'Compiler 'Error: 'un-even 'type 'error 'for 'sym: sym 'types: types)
+;; 	(map (lambda (ts)
+;; 	       ;;(print 'ts: ts)
+;; 	       (let ((ttt (if (list? ts)
+;; 			      (apply impc:ti:intersection* ts)
+;; 			      (impc:ti:intersection* ts))))
+;; 		 (if (and (list? ttt)
+;; 			  (= (length ttt) 1))
+;; 		     (car ttt)
+;; 		     ttt)))
+;; 	     (map (lambda (i)
+;; 		    (map (lambda (t)
+;; 			   (let ((tt (list-ref t i)))
+;; 			     (if (list? tt) 
+;; 				 ;; check to see if tt need further unification
+;; 				 (cond ((null? tt) '())
+;; 				       ((list? (car tt))
+;; 					(impc:ti:complex-unify sym tt))
+;; 				       (else tt))
+;; 				 ;; need to make atoms into lists 
+;; 				 ;; so we can pass them through cl:intersection
+;; 				 (list tt))))
+;; 			 types))
+;; 		  (make-list-with-proc (length (car types)) (lambda (i) i)))))))
+
+;; (define impc:ti:complex-unify
+;;   (lambda (sym types)
+;;     ;;(println 'sym: sym 'types: types)
+;;     ;; first check if there are named types involved at a top level
+;;     (if (cl:find-if (lambda (x)
+;; 		      (if (and (string? x)
+;; 			       (or (llvm:get-named-type (impc:ir:get-base-type x))
+;; 				   (llvm:get-named-type (impc:ir:get-base-type (substring x 1 (string-length x))))))
+;; 			  #t
+;; 			  #f))
+;; 		    types)
+;; 	;; then handle the named type!
+;; 	(let* ((named-type #f)
+;; 	       (types2 (map (lambda (x)
+;; 			      ;;(println 'x: x)
+;; 			      (if (string? x)
+;; 				  (let ((x2 (if (char=? (string-ref x 0) #\%)
+;; 						(substring x 1 (string-length x))
+;; 						x)))
+;; 				    (if (llvm:get-named-type (impc:ir:get-base-type x2))
+;; 					(let ((t (llvm:get-named-type (impc:ir:get-base-type x2)))
+;; 					      (ptrdepth (impc:ir:get-ptr-depth x2)))
+;; 					  (set! named-type x)
+;; 					  (set! t (apply string-append t (make-list-with-proc ptrdepth (lambda (i) "*"))))
+;; 					  (impc:ir:get-type-from-str t))
+;; 					x))
+;; 				  x))
+;; 			    types))
+;; 	       (firsttype (car types2))
+;; 	       (res (cl:remove #t (map (lambda (t3) (equal? firsttype t3)) (cdr types2)))))
+;; 	  ;;(println 'sym2: sym 'types: types)
+;; 	  ;; (println 'named-type: named-type 'res: res )
+;; 	  (if (null? res) ;; if res is null that's a success!
+;; 	      named-type
+;; 	      (print-error 'Compiler 'Error: 'could 'not 'resolve 'top 'level 'named 'type 'sym: sym 'options: types)))
+;; 	;; remove the everything above to go back to the original code (as below)
+;; 	(begin 
+;; 	  ;; (println 'types-: types)
+;; 	  ;; next do a sanity check
+;; 	  (if (cl:find-if (lambda (x) (not (list? x))) types)
+;; 	      (apply print-error 'Compiler 'Error: 'bad 'type: (symbol->string sym) 'invalid 'mixed 'type 'definitions: types))
+;; 	  ;; first check that all complex types
+;; 	  ;; are the same length
+;; 	  ;; otherwise we have a problem
+;; 	  (if (and (> (length types) 1)
+;; 		   (not (apply = (map length types))))
+;; 	      (print-error 'Compiler 'Error: 'un-even 'type 'error 'for 'sym: sym 'types: types)
+;; 	      (map (lambda (ts)
+;; 		     ;;(println 'ts: ts)
+;; 		     (let ((ttt (if (list? ts)
+;; 				    (apply impc:ti:intersection* ts)
+;; 				    (impc:ti:intersection* ts))))
+;; 		       (if (and (list? ttt)
+;; 				(= (length ttt) 1))
+;; 			   (car ttt)
+;; 			   ttt)))
+;; 		   (map (lambda (i)
+;; 			  (map (lambda (t)
+;; 				 (let ((tt (list-ref t i)))
+;; 				   (if (list? tt) 
+;; 				       ;; check to see if tt need further unification
+;; 				       (cond ((null? tt) '())
+;; 					     ((list? (car tt))
+;; 					      (impc:ti:complex-unify sym tt))
+;; 					     (else tt))
+;; 				       ;; need to make atoms into lists 
+;; 				       ;; so we can pass them through cl:intersection
+;; 				       (list tt))))
+;; 			       types))
+;; 			(make-list-with-proc (length (car types)) (lambda (i) i)))))))))
 
 (define impc:ti:complex-unify
-   (lambda (sym types)
-      ;; first a sanity check
-      (if (cl:find-if (lambda (x) (not (list? x))) types)
-          (apply print-error 'Compiler 'Error: 'bad 'type: (symbol->string sym) 'invalid 'mixed 'type 'definitions: types))
-      ;; first check that all complex types
-      ;; are the same length
-      ;; otherwise we have a problem
-      (if (and (> (length types) 1)
-               (not (apply = (map length types))))
-          (print-error 'Compiler 'Error: 'un-even 'type 'error 'for 'sym: sym 'types: types)
-          (map (lambda (ts)
-                  ;(print 'ts: ts)
-                  (let ((ttt (if (list? ts)
-                                 (apply impc:ti:intersection* ts)
-                                 (impc:ti:intersection* ts))))
-                     (if (and (list? ttt)
-                              (= (length ttt) 1))
-                         (car ttt)
-                         ttt)))
-               (map (lambda (i)
-                       (map (lambda (t)
-                               (let ((tt (list-ref t i)))
-                                  (if (list? tt) 
-                                      ;; check to see if tt need further unification
-                                      (cond ((null? tt) '())
-                                            ((list? (car tt))
-                                             (impc:ti:complex-unify sym tt))
-                                            (else tt))
-                                      ;; need to make atoms into lists 
-                                      ;; so we can pass them through cl:intersection
-                                      (list tt))))
-                            types))
-                    (make-list-with-proc (length (car types)) (lambda (i) i)))))))
+  (lambda (sym types vars)
+    ;(println 'cu:> 'sym: sym 'types: types)
+    ;(println 'types types)
+
+    (set! types (map (lambda (x)
+		       (if (string? x)
+			   (let ((x2 (if (char=? (string-ref x 0) #\%)
+					 (substring x 1 (string-length x))
+					 x)))
+			     (if (llvm:get-named-type (impc:ir:get-base-type x2))
+				 (let ((t (llvm:get-named-type (impc:ir:get-base-type x2)))
+				       (ptrdepth (impc:ir:get-ptr-depth x2)))
+				   ;(set! named-type x)
+				   (set! t (apply string-append t (make-list-with-proc ptrdepth (lambda (i) "*"))))
+				   (impc:ir:get-type-from-str t))
+				 x))
+			   x))
+		     types))
+
+    ;(println 'vars: vars)
+    (set! types (impc:ti:type-unify types vars))
+    ;(println 'types2: types)
+    
+    ;; next do a sanity check
+    ;; (if (cl:find-if (lambda (x) (not (list? x))) types)	
+    ;; 	(apply print-error 'Compiler 'Error: 'bad 'type: (symbol->string sym) 'invalid 'mixed 'type 'definitions: types))
+    
+    ;; do we need sub unification?  (NOT SURE IF I SHOULD DO THIS REALLY!)
+;;     (if (cl:find-if (lambda (x) (not (list? x))) types)
+;; 	(set! types (list (apply impc:ti:intersection*
+;; 				 (map (lambda (k)
+;; 					(println 'k: k)
+;; 					(if (atom? k)
+;; 					    (list k) k))
+;; 				      types)))))
+;; ;;	(apply print-error 'Compiler 'Error: 'bad 'type: (symbol->string sym) 'invalid 'mixed 'type 'definitions: types))
+
+    ;(println 'sym: sym 'types3: types)
+    types))
+    
+    ;; ;; first check that all complex types
+    ;; ;; are the same length
+    ;; ;; otherwise we have a problem
+    ;; (if (impc:ir:type? types)
+    ;; 	types
+    ;; 	(if (and (> (length types) 1)
+    ;; 		 (not (apply = (map length types))))
+    ;; 	    (print-error 'Compiler 'Error: 'un-even 'type 'error 'for 'sym: sym 'types: types)
+    ;; 	    (let* ((nlist (map (lambda (i)		    
+    ;; 				 (map (lambda (t)
+    ;; 					;(println 't: t)
+    ;; 					(let ((tt (list-ref t i)))
+    ;; 					  (println 'sym: sym 't: t 'tt: tt)
+    ;; 					  (if (list? tt) 
+    ;; 					      ;; check to see if tt need further unification
+    ;; 					      (cond ((null? tt) '())
+    ;; 					;((list? (car tt))
+    ;; 					; (impc:ti:type-unify sym tt))
+    ;; 						    ((and (list? tt)
+    ;; 							  (not (impc:ir:type? tt)))
+    ;; 						     (impc:ti:sym-unify sym tt vars))
+    ;; 						    (else tt))
+    ;; 					      ;; need to make atoms into lists 
+    ;; 					      ;; so we can pass them through cl:intersection
+    ;; 					      (list tt))))
+    ;; 				      types))
+    ;; 			       (make-list-with-proc (length (car types)) (lambda (i) i))))
+    ;; 		   (res (map (lambda (ts)
+    ;; 					;(println 'ts2: ts)
+    ;; 			       ;(set! ts (impc:ti:unify-var-scan ts ts))
+    ;; 					;(println 'ts3: ts)
+    ;; 			       (let ((ttt (if (list? ts)
+    ;; 					      (apply impc:ti:intersection* ts)
+    ;; 					      (impc:ti:intersection* ts))))
+    ;; 					;(println 'ts: ts 'ttt: ttt)
+    ;; 				 (if (and (list? ttt)
+    ;; 					  (= (length ttt) 1))
+    ;; 				     (car ttt)
+    ;; 				     ttt)))
+    ;; 			     nlist)))
+    ;; 	      (println 'nlist: nlist 'res: res)
+    ;; 	      res)))))
 
 
 ;; return simple types without change
 ;; pass complex types through to impc:ti:complex-unify
+;; (define impc:ti:type-unify
+;;    (lambda (sym types)
+;;       (println 'tu:> sym types)
+;;       (if (not (cl:find-if list? types))
+;;           (if (= (length types) 1)
+;;               (car types)
+;;               types) ;; if not complex just return it
+;; 	  (let (;(lll (println 'stuff))
+;; 		(ntypes (flatten-1 (impc:ti:unify-var-scan types types))))
+;; 	    ;(println 'types: types 'ntypes: ntypes)
+;; 	    (impc:ti:complex-unify sym ntypes)))))
+
+
+;; type unify
+;;
+;; if 't' is a symbol? return it's var assoc otherwise return 't'
+;; if 't' is a list? check if it is a valid complex type (tuple closure or array)
+;;                         if it isn't then assume multiple choice and do intersection
+
+;; (define impc:ti:type-unify
+;;   (lambda (t vars)
+;;     (cond ((atom? t)
+;; 	   (if (symbol? t)
+;; 	       (impc:ti:type-unify (impc:ti:symbol-expand t vars '()) vars)
+;; 	       t))
+;; 	   ;; (if (and (symbol? t)
+;; 	   ;; 	    (assoc t vars))
+;; 	   ;;     (impc:ti:type-unify (cdr (assoc t vars)) vars)
+;; 	   ;;     t))
+;; 	  ((list? t)
+;; 	   (cond ((and (number? (car t))
+;; 		       (<> (car t) *impc:ir:void*)
+;; 		       (> (modulo (car t) *impc:ir:pointer*) 10))
+;; 		  (map (lambda (v) (impc:ti:type-unify v vars)) t))
+;; 		 (else (let* ((trick (map (lambda (v)
+;; 					    (impc:ti:type-unify v vars))
+;; 					  t))
+;; 			      (typelgth (if (list? (car trick)) (length (car trick)) 1))
+;; 			      (atoms (cl:remove-duplicates (cl:remove #f (map (lambda (v) (if (atom? v) v #f)) trick))))
+;; 			      (lists (cl:remove #f (map (lambda (v) (if (list? v) v #f)) trick))))
+;; 			 (println 'trick: trick 'atoms: atoms 'lists: lists)
+;; 			 (set! lists (apply impc:ti:intersection* lists))
+;; 			 (if (<> (length lists) typelgth) (set! lists '()))
+;; 			 ;(println 'lists: lists)
+;; 			 (if (null? atoms) lists
+;; 			     (if (> (length atoms) 1)
+;; 				 (append atoms lists)
+;; 				 (if (or (null? lists)
+;; 					 (member (car atoms) lists))
+;; 				     (car atoms)
+;; 				     (append atoms lists))))))))
+;; 	  ((pair? t)
+;; 	   (impc:ti:type-unify (cdr t) vars))
+;; 	  (else (print-error 'Compiler 'Error: 'bad 'type t 'in 'unification)))))
+
+
+
+;; this goes through IN ORDER and returns either:
+;; NULL if the lists don't match
+;; or 
+(define impc:ti:unify-lists
+  (lambda args
+    ;(println 'unify: args 'norm: (impc:ti:type-normalize args))
+    (if (null? args)
+	args
+	(let ((lgths (map (lambda (k) (length k)) args)))
+	  (if (not (null? (cl:remove (car lgths) lgths)))
+	      '()
+	      (let ((result
+		     (apply map (lambda args
+				  (let ((l1 (cl:remove '() args)))
+				    (if (null? l1) l1
+					(let ((l2 (cl:remove-duplicates l1)))
+					  (if (null? l2)
+					      l2	     
+					      ;;(car l2))))))
+					      (if (= 1 (length l2))
+					      	  (car l2)
+					      	  '()))))))
+			    args)))
+		;(println 'result: result)
+		(if (member '() result)
+		    '()
+		    result)))))))
+
+
+;; this is here to normalize any recursive tuples
+;; i.e. put them in their simplist "named" form
+;; you can pass in a a complete list of types
+;; at the end and have this normalize them
+
+;; (define impc:ti:type-normalize
+;;   (lambda (t)
+;;     (cond ((atom? t) t)
+;; 	  ((and (list? t)
+;; 		(number? (car t))
+;; 		(= *impc:ir:tuple* (modulo (car t) *impc:ir:pointer*)))
+;; 	   ;; first check all sub tuples for possible normalization!	   
+;; 	   (set! t (map (lambda (a) (impc:ti:type-normalize a)) t))
+;; 	   (let ((named-types (cl:remove-if-not string? t)))
+;; 	     (if (null? named-types)
+;; 		 t
+;; 		 ;(impc:ti:type-normalize t) ;(cdr t))
+;; 		 (let ((res (map (lambda (k)
+;; 				   ;(println 'k: k ': (llvm:get-named-type k) '-> (impc:ir:get-type-from-str (llvm:get-named-type k)))				   
+;; 				   (println t '= (impc:ir:get-type-from-str (llvm:get-named-type k)))
+;; 				   (if (equal? t (impc:ir:get-type-from-str (llvm:get-named-type k))) k #f))
+;; 				 named-types)))
+;; 		   (set! res (cl:remove-if-not string? res))
+;; 		   (println 'res: res)
+;; 		   (if (null? res)
+;; 		       (impc:ti:type-normalize (cdr t))
+;; 		       (if (car res)
+;; 			   (car res)
+;; 			   t))))))
+;; 	  ((pair? t)
+;; 	   (cons (impc:ti:type-normalize (car t))
+;; 		 (impc:ti:type-normalize (cdr t)))))))
+
+
+;; this is here to normalize any recursive tuples
+;; i.e. put them in their simplist "named" form
+;; you can pass in a a complete list of types
+;; at the end and have this normalize them
+(define impc:ti:type-normalize
+  (lambda (t)
+    (cond ((atom? t) t)	  
+	  ((and (list? t)
+		(not (null? t))
+		(number? (car t))
+		(= *impc:ir:tuple* (modulo (car t) *impc:ir:pointer*)))
+	   ;; first check all sub tuples for possible normalization!	   
+	   (set! t (map (lambda (a) (impc:ti:type-normalize a)) t))
+	   (let ((named-types (cl:remove-if-not string? t)))
+	     (if (null? named-types)
+		 t
+		 (let ((res (map (lambda (k)
+				   (let* ((split (regex:split k "%|(--)"))
+					  (gen-type (symbol->string (impc:ir:gpolytype-types (cadr split))))
+					  (named-type (impc:ir:get-type-from-str (llvm:get-named-type k)))
+					  (match (map (lambda (a b)
+							(if (equal? a b) #t
+							    (if (and (symbol? a)
+								     (regex:match? gen-type (symbol->string a)))
+								#t
+								#f)))
+						      t ;; type coming in
+						      named-type)))
+				     (if (member #f match) #f k)))
+				 named-types)))
+		   (set! res (cl:remove-if-not string? res))
+		   (if (null? res)
+		       (impc:ti:type-normalize (cdr t))
+		       (if (car res)
+			   (car res)
+			   t))))))
+	  ((pair? t)
+	   (cons (impc:ti:type-normalize (car t))
+		 (impc:ti:type-normalize (cdr t)))))))
+
+
+
+
+
+
 (define impc:ti:type-unify
-   (lambda (sym types)
-      ;(print 'types: types)
+  (lambda (t vars)
+    ;(println 't: t)
+    (cond ((atom? t)
+	   ;; (if (symbol? t)
+	   ;;     (impc:ti:type-unify (impc:ti:symbol-expand t vars '()) vars)
+	   ;;     t))
+	   (if (and (symbol? t)
+	   	    (assoc t vars))
+	       (impc:ti:type-unify (cdr (assoc t vars)) vars)
+	       (if (and (symbol? t)
+	   		(impc:ir:gpolytype-types (string->symbol (impc:ir:get-base-type (car (regex:split (car (regex:split (symbol->string t) "##")) "%"))))))
+	   	   (impc:ti:symbol-expand-generic-type t vars '())
+	   	   t)))
+	  ((list? t)
+	   (cond ((impc:ti:complex-type? t)
+		  (map (lambda (v) (impc:ti:type-unify v vars)) t))
+		 (else (let* ((trick (impc:ti:type-normalize 
+				      (map (lambda (v)
+					     (impc:ti:type-unify v vars))
+					   t)))
+			      (typelgth (if (list? (car trick)) (length (car trick)) 1))
+			      (atoms (cl:remove-duplicates (cl:remove #f (map (lambda (v) (if (and (atom? v) (not (null? v))) v #f)) trick))))
+			      (lists (cl:remove #f (map (lambda (v) (if (list? v) v #f)) trick))))
+			 
+			 ;; (println)
+			 ;; (println 'type: t)
+			 ;; (println 'typelgth: typelgth)
+			 ;; (println 'trick: trick)
+			 ;; (println 'atoms: atoms)
+			 ;; (println 'lists: lists)
+			 ;; (println)
+
+			 (set! lists (apply impc:ti:unify-lists lists))
+			 
+			 ;; (println 'uniflists: lists)
+			 ;; typelgth helps us to decide if the returned type has
+			 ;; been artificially shortened because of unification
+			 ;; for example (f (112 2 3) (112 2 3) (112 2 sym))
+			 ;; may unify as (112 2) if sym cannot be expanded.
+			 ;; this length check basically says we cannot unify
+			 ;; succesfully in this instance so return null
+			 (if (<> (length lists) typelgth) (set! lists '()))
+			 (if (null? atoms) lists
+			     (if (> (length atoms) 1)
+				 (append atoms lists)
+				 (if (or (null? lists)
+					 (member (car atoms) lists))
+				     (car atoms)
+				     (append atoms lists))))))))
+	  ((pair? t)
+	   (impc:ti:type-unify (cdr t) vars))
+	  (else (print-error 'Compiler 'Error: 'bad 'type t 'in 'unification)))))
+
+
+(define impc:ti:sym-unify
+   (lambda (sym types vars)
+      ;(println 'tu:> sym types)
       (if (not (cl:find-if list? types))
           (if (= (length types) 1)
               (car types)
               types) ;; if not complex just return it
-          (impc:ti:complex-unify sym types))))
+	  (impc:ti:complex-unify sym types vars))))
+	  ;; (let (;(lll (println 'stuff))
+	  ;; 	(ntypes (flatten-1 (impc:ti:unify-var-scan types types))))
+	  ;;   ;(println 'types: types 'ntypes: ntypes)
+	  ;;   (impc:ti:complex-unify sym ntypes vars)))))
 
 
 ;;
 ;; takes un-unified types and returns unified ones (hopefully!)
 ;; 
+;; (define impc:ti:unify
+;;    (lambda (vars)
+;;       ;(println 'unify------: vars)
+;;       (map (lambda (v)
+;; 	      ;(println 'v: v 'vars: vars)
+;;               (let* ((sym (car v))
+;;                      ;; expand any symbols and do reverse symbol checks
+;;                      (types-expanded (map (lambda (t)
+;; 					     ;(println 't: t)
+;;                                              (if (or (symbol? t)
+;;                                                      (list? t))
+;;                                                  (impc:ti:symbol-expand t vars (cdr v))
+;;                                                  t))
+;;                                           (cdr v)))
+;; 		     ;(lllllll (println 'sym: sym 'types-expanded: types-expanded 'vars: vars))
+;;                      (types-unified (impc:ti:type-unify sym types-expanded)))
+;; 		 (println 'types-unified: types-unified)
+;;                  ;(println 'un-expanded (cdr v))
+;; 		 (println 'un-unified types-expanded)
+;; 		 ;(println 'unified types-unified)
+;;                  (cons sym types-unified)))
+;;            vars)))
+
+;; this goes through a var list and tries to fill in symbol names
+;; vars1 and vars2 start the same but vars2 stays the same while
+;; vars1 changes
+;;
+;; it also tries to remove any redundant optional choices
+;; i.e. changes this (211 (2) (2)) into this (211 2 2)  
+;; (define impc:ti:unify-var-scan  
+;;   (lambda (vars1 vars2)
+;;     ;(println 'unify-var-scan vars1)
+;;     (map (lambda (v)
+;; 	   (if (atom? v) v
+;; 	       (if (atom? (cdr v))
+;; 		   v
+;; 		   (cons (car v)
+;; 			 (map (lambda (k)
+;; 				(cond ((symbol? k)
+;; 				       (if (not (cl:find-if atom? vars2))
+;; 						(assoc k vars2))
+;; 					   (cdr (assoc k vars2))
+;; 					   k))
+;; 				      ((list? k)
+;; 				       (println 'k: k)
+;; 				       (let ((res (car (impc:ti:unify-var-scan (list k) vars2))))
+;; 					 (if (and (list? res)
+;; 						  (= 1 (length res))
+;; 						  (impc:ir:type? (car res)))
+;; 					     (car res)
+;; 					     res)))					 
+;; 				      (else k)))
+;; 			 (cdr v)))))
+;; 	 vars1)))
+
+;; unify is a little bit ugly
+;; 1st it expands all symbols - during this process vars can be modified (force-var, update-var)
+;; 2nd because var can change we check result against var to see if any change to var has improved things
+;; 3rd because step 2 may have made changes for the better we should do a final symbol check we
+;; basically means going through the final result list to see if any symbols left in complex
+;; types can be given types.
 (define impc:ti:unify
-   (lambda (vars)
-      (map (lambda (v)              
-              (let* ((sym (car v))
-                     ;; expand any symbols and do reverse symbol checks
-                     (types-expanded (map (lambda (t)                                   
-                                             (if (or (symbol? t)
-                                                     (list? t))
-                                                 (impc:ti:symbol-expand t vars (cdr v))
-                                                 t))
-                                          (cdr v)))
-                     (types-unified (impc:ti:type-unify sym types-expanded)))  
-                 ;(print 'un-expanded (cdr v) 'un-unified types-expanded 'unified types-unified)
-                 (cons sym types-unified)))
-           vars)))
+   (lambda (vars)     
+      ;(println 'unifyvars: vars)
+      (let ((result (map (lambda (v)
+			   ;(println 'v: v)
+			   (let* ((sym (car v))
+				  ;; expand any symbols and do reverse symbol checks
+				  (types-expanded (map (lambda (t)
+							 ;(println 't: t)
+							 (if (or (symbol? t)
+								 (list? t))
+							     (let ((res (impc:ti:symbol-expand t vars (cdr v))))
+							       ;(println 'out: t '-> res)
+							       res)
+							     ;(impc:ti:symbol-expand t vars (cdr v))
+							     t))
+						       (cdr v)))
+				  ;(kkkkkkkk (println 'types-expanded: types-expanded))
+				  (types-unified (impc:ti:sym-unify sym types-expanded vars)))
+			     ;; (println 'types-unified: types-unified)
+			     ;; (println 'un-expanded (cdr v))
+			     ;; (println 'un-unified types-expanded)
+			     ;; (println 'unified types-unified)
+			     ;; (println 'vdone: v)
+			     (cons sym types-unified)))
+			 vars)))
+	;(println 'result: result)
+	;; and return result
+	result)))
+
 
 ;; checks to see if a type system is completely unified
 (define impc:ti:unity?
@@ -798,6 +1387,7 @@
    (lambda args
       (cl:remove-if null? args)))
 
+
 ;; probably should use a state monad for this but ...
 ;; vars must be a list of lists
 ;; NOT an assoc list with pairs
@@ -805,19 +1395,27 @@
 ;; don't allow update to add to kts values
 (define impc:ti:update-var
    (lambda (sym vars kts t)
-      ;(println 'update-var:> sym 'in: vars 'with: t 'kts: kts)
-      (if (member sym kts) ;; if in known types don't do anything
-          '()
-          (if (and (not (assoc sym vars))
-		   (not (llvm:get-function (symbol->string sym)))
-		   (not (llvm:get-globalvar (symbol->string sym))))
-              (print-error 'Compiler 'Error: 'var (symbol->string sym) 'does 'not 'exist)
-              (let ((pair (assoc sym vars)))
-		(if pair
-		    (if (impc:ir:type? t)
-			(set-cdr! pair (cl:remove-duplicates (append (list t) (cdr pair))))
-			(set-cdr! pair (cl:remove-duplicates (append t (cdr pair)))))
-		    '()))))))
+     ;(println 'updatevar: sym 't: t)
+     ;(if (equal? sym 'f) (begin (println '-> 'updating sym t))) ; (error)))
+     ;; don't ever add oursevles (i.e. sym) as a type arg or NULL
+     (if (or (null? t)
+	     (and (list? t)
+		  (equal? sym (car t)))
+	     (equal? sym t))
+	 'exit
+	 (begin ;; (println 'update-var:> sym 'in: vars 'with: t 'kts: kts)
+	   (if (member sym kts) ;; if in known types don't do anything
+	       '()
+	       (if (and (not (assoc sym vars))
+			(not (llvm:get-function (symbol->string sym)))
+			(not (llvm:get-globalvar (symbol->string sym))))
+		   (print-error 'Compiler 'Error: 'var (symbol->string sym) 'does 'not 'exist)
+		   (let ((pair (assoc sym vars)))
+		     (if pair ;; global vars and functions aren't in vars but that's ok
+			 (if (impc:ir:type? t)
+			     (set-cdr! pair (cl:remove-duplicates (append (list t) (cdr pair))))
+			     (set-cdr! pair (cl:remove-duplicates (append t (cdr pair))))))
+		     '())))))))
 
 
 ;; force a var to a particular type
@@ -826,7 +1424,9 @@
 ;; do allow force-var to overwrite kts values
 (define impc:ti:force-var
    (lambda (sym vars kts t)
-      ;(println 'force-var:> sym 'in: vars 'with: t 'kts: kts)            
+      ;(if (equal? sym 'length) (begin (println '-> 'forcing 'length t))) ; (error)))     
+      ;(if (equal? sym 'l) (println '-> 'forcing 'l t))     
+      ;(println 'force-var:> sym 'in: vars 'with: t 'kts: kts)
       (if (and (not (assoc sym vars))
                (not (llvm:get-globalvar (symbol->string sym))))
           (print-error 'Compiler 'Error: 'var (symbol->string sym) 'does 'not 'exist)
@@ -869,7 +1469,7 @@
                  (let* ((t1 (impc:ti:symbol-check request? vars kts #f))
                         (t2 (impc:ti:numeric-check ast vars kts #f))
                         (t3 (cl:intersection t1 t2)))
-                    t3))
+		    (if (null? t1) t2 t3)))
                 ((list? request?)
                  (let* ((t1 (impc:ti:numeric-check ast vars kts #f))
                         (t2 (cl:intersection request? t1)))
@@ -889,8 +1489,10 @@
               (list *impc:ir:double* *impc:ir:float*)))))
 
 
+;; IS NEW
 (define impc:ti:symbol-check
    (lambda (ast vars kts request?)
+      ;(println 'symbolcheck 'ast: ast 'vars: vars 'request: request?)
       (if *impc:ti:print-sub-checks* (println 'sym:> 'ast: ast 'request? request?))
       ;; if a request is made - assume it's forced
       ;; find the intersection between the request
@@ -904,34 +1506,53 @@
 		      (if (llvm:get-function (symbol->string ast))
 			  (list (cons (+ *impc:ir:closure* *impc:ir:pointer* *impc:ir:pointer*) (map impc:ir:get-type-from-str (llvm:get-function-args-withoutzone (symbol->string ast)))))
                           (list (impc:ir:pointer-- (impc:ir:get-type-from-str (llvm:get-global-variable-type (symbol->string ast)))))))))
+	 ;(println 'sym: ast 'type: type 'request? request?)
          (if (and request?
                   (not (null? request?)))             
-             (let ((intersection (cl:intersection (if (null? type) ;; if type is null then force request
-                                                      (if (atom? request?) (list request?) request?)
-                                                      (if (atom? type) (list type) type))
-                                                  ;; if request is not a set make it one
-                                                  (if (atom? request?) (list request?) request?))))
-                (if (not (null? intersection))
-                    (begin (impc:ti:force-var ast vars kts intersection)
-                           intersection)
-                    type))
-             type))))
+             ;; (let ((intersection (cl:intersection (if (null? type) ;; if type is null then force request
+             ;;                                          (if (atom? request?) (list request?) request?)
+             ;;                                          (if (atom? type) (list type) type))
+             ;;                                      ;; if request is not a set make it one
+             ;;                                      (if (atom? request?) (list request?) request?))))
+	     (if (null? type)
+		 (begin ;(println 'ingo) ;(impc:ti:force-var ast vars kts intersection)
+		   (impc:ti:update-var ast vars kts (list request?))
+		   request?)
+		 (let ((intersection (impc:ti:type-unify (list request? type) vars)))
+		   ;(println 'intersection intersection 'request? request? 'type: type)
+		   (if (not (null? intersection))
+		       (begin ;(impc:ti:force-var ast vars kts intersection)
+			 (impc:ti:update-var ast vars kts (list intersection))
+			 (list intersection))
+		       type)))
+	     type))))
 
 
 
 (define impc:ti:math-check
    (lambda (ast vars kts request?)
-      (let* ((a (impc:ti:type-check (cadr ast) vars kts request?))
-             (b (impc:ti:type-check (caddr ast) vars kts request?))
-             (t (cl:intersection (if (atom? a) (list a) a) 
-                                 (if (atom? b) (list b) b))))
-         ;(println 'math: a b 'vars: vars)
+      (let* ((a (impc:ti:type-unify (impc:ti:type-check (cadr ast) vars kts request?) vars))
+             (b (impc:ti:type-unify (impc:ti:type-check (caddr ast) vars kts request?) vars))
+	     (t (impc:ti:type-unify (list a b) vars)))
+         ;(println 'math: a b 't: t 'request? request? 'ast: ast 'vars: vars)
          (if *impc:ti:print-sub-checks* (println 'math:> 'ast: ast 'a: a 'b: b 't: t 'request? request?))
          (if (not (null? t))
              (begin (if (symbol? (cadr ast)) (impc:ti:force-var (cadr ast) vars kts t))
                     (if (symbol? (caddr ast)) (impc:ti:force-var (caddr ast) vars kts t))
-                    t)
-             (cond ((not (cl:find-if symbol? (cdr ast))) t) ;; return t
+		    (if (and (not (null? t)) ;; this here because math functions always return non-pointer vectors
+			     (impc:ir:vector? t) ;; we want to do this because these vectors are always stack allocated
+			     (impc:ir:pointer? t)) ;; also these vectors are immutable (i.e. cannot use vector-set!)
+			(impc:ir:pointer-- t)
+			t))
+             (cond ((impc:ir:vector? a)
+		    ;(println 'veca: a)
+		    (if (symbol? (cadr ast)) (impc:ti:update-var (cadr ast) vars kts a))
+		    (if (impc:ir:pointer? a) (impc:ir:pointer-- a) a))
+		   ((impc:ir:vector? b)
+		    ;(println 'vecb: b)
+		    (if (symbol? (caddr ast)) (impc:ti:update-var (cadr ast) vars kts b))
+		    (if (impc:ir:pointer? b) (impc:ir:pointer-- b) b))
+	           ((not (cl:find-if symbol? (cdr ast))) t) ;; return t
                    ((and (symbol? (cadr ast)) 
                          (symbol? (caddr ast))                         
                          (not (null? (cdr (impc:ti:get-var (cadr ast) vars))))
@@ -948,19 +1569,33 @@
                    (else t))))))
 				   
 
-
 (define impc:ti:compare-check
    (lambda (ast vars kts request?)
       (let* ((n1 (if (number? (cadr ast)) (caddr ast) (cadr ast)))
 	     (n2 (if (number? (cadr ast)) (cadr ast) (caddr ast)))
-	     (a (impc:ti:type-check n1 vars kts request?))
-             (b (impc:ti:type-check n2 vars kts request?))
-             (t (cl:intersection (if (atom? a) (list a) a) 
-                                 (if (atom? b) (list b) b))))
+	     (a (impc:ti:type-unify (impc:ti:type-check n1 vars kts request?) vars))
+             (b (impc:ti:type-unify (impc:ti:type-check n2 vars kts request?) vars))
+	     (t (impc:ti:type-unify (list a b) vars)))
+	 ;(println 'a a 'b b 't t)
          (if *impc:ti:print-sub-checks* (println 'compare:> 'ast: ast 'a: a 'b: b 't: t 'request? request?))
-         (if (not (null? t)) 
-             (list *impc:ir:i1*)
-             (cond ((not (cl:find-if symbol? (cdr ast))) (list *impc:ir:i1*)) ;; return t
+         (if (not (null? t))
+             (begin (if (symbol? (cadr ast)) (impc:ti:force-var (cadr ast) vars kts t))
+                    (if (symbol? (caddr ast)) (impc:ti:force-var (caddr ast) vars kts t))
+		    (if (and (not (null? t))
+			     (impc:ir:vector? t))
+			(if (impc:ir:pointer? t)
+			    (list (- (car t) *impc:ir:pointer*) (cadr t) *impc:ir:i1*)
+			    (list (car t) (cadr t) *impc:ir:i1*))
+			(list *impc:ir:i1*)))
+             (cond ((impc:ir:vector? a)
+		    (if (symbol? (cadr ast)) (impc:ti:update-var (cadr ast) vars kts a))
+		    (let ((retvec (if (impc:ir:pointer? a) (impc:ir:pointer-- a) a)))
+		      (list (car retvec) (cadr retvec) *impc:ir:i1*)))
+		   ((impc:ir:vector? b)
+		    (if (symbol? (caddr ast)) (impc:ti:update-var (cadr ast) vars kts b))
+		    (let ((retvec (if (impc:ir:pointer? b) (impc:ir:pointer-- b) b)))
+		      (list (car retvec) (cadr retvec) *impc:ir:i1*)))
+		   ((not (cl:find-if symbol? (cdr ast))) (list *impc:ir:i1*)) ;; return t
                    ((and (symbol? n1) 
                          (symbol? n2)                         
                          (not (null? (cdr (impc:ti:get-var n1 vars))))
@@ -1005,11 +1640,205 @@
          (list (car ftype)))))
 
 
+
+
+;; generics check
+(define impc:ti:nativef-generics
+   (lambda (ast vars kts request?)
+     ;(println 'generics-check 'ast: ast 'vars: vars 'request: request?)
+     (let* ((gname (string->symbol (car (regex:split (symbol->string (car ast)) "##")))) ;"\\$\\$\\$"))))
+	    (gnum (string->number (cadr (regex:split (symbol->string (car ast)) "##")))) ;"\\$\\$\\$"))))
+	    (gpoly-type (impc:ir:get-type-from-pretty-str (symbol->string (car (impc:ir:gpoly-types gname))))))
+	 
+	 ;(println 'gpoly-type:> gpoly-type)
+	 ;(println 'gpoly-typeb:> (car (impc:ir:gpoly-types gname)))
+         (if (<> (length (cdr gpoly-type))
+                 (length ast))
+             (print-error 'Compiler 'Error: 'bad 'arity 'in 'generics 'call ast))
+	 ;; convert all !head in gpoly-type into !head$$$gnum
+	 (letrec ((lfunc (lambda (pt)
+			   ;(println 'pt: pt)
+			   (cond ((null? pt) '())
+				 ((symbol? pt)
+				  ;; (if (regex:match? (symbol->string pt) "!")
+				  ;;     (string->symbol (string-append (symbol->string pt) "$$$" (number->string gnum)))
+				  ;;     pt))
+				  (if (regex:match? (symbol->string pt) "!")
+				      (string->symbol (string-append (symbol->string pt) "##" (number->string gnum))) ;"$$$" (number->string gnum)))
+				      (if (assoc (string->symbol (impc:ir:get-base-type (symbol->string pt))) *impc:ir:gpolytypes*)
+				      	  (string->symbol (string-append (symbol->string pt) "##" (number->string gnum))) ; "$$$" (number->string gnum)))
+					  pt)))
+				 ((pair? pt)
+				  (cons (lfunc (car pt))
+					(lfunc (cdr pt))))
+				 (else pt)))))
+	   (set! gpoly-type (lfunc gpoly-type)))
+	 
+	 ;(println 'gpoly-type2:> gpoly-type)
+	 ;(println 'b:  (cdr ast) (cddr gpoly-type))
+	 ;(println 'vars: vars)
+
+	 ;; type inferencing for generic functions arguments
+         (let ((res (map (lambda (a gt)
+	 		   ;(println 'a: a 'gt: gt)
+			   ;;(println 'avars: (assoc a vars))
+	 		   ;; gt for generics type
+	 		   (let ((tt (impc:ti:type-check a vars kts gt)))
+			     ;;(println 'avars2: (assoc a vars))
+			     ;(if (and (list? tt) (> (length tt) 1)) (set! tt (list tt)))
+	 		     ;;(println 'a: a 'tt: tt 'gt: gt)
+	 		     (if (and (atom? gt)
+	 			      (regex:match? (symbol->string gt) "!"))
+	 			 (begin ;(println 'generic-match-a-! 'a: a 'tt: tt 'u: (impc:ti:type-unify tt vars))
+					(if (symbol? tt)
+					    (impc:ti:update-var gt vars kts (impc:ti:type-unify (cdr (assoc tt vars)) vars))
+					    ;; (let ((val (impc:ti:type-unify (cdr (assoc tt vars)) vars)))
+					    ;;   (if (impc:ir:type? val)
+					    ;; 	  (impc:ti:update-var gt vars kts val)))
+					    (impc:ti:update-var gt vars kts (impc:ti:type-unify tt vars)))))
+
+			     ;(println 'tt: tt 'gt: gt)
+			     (if (atom? tt)
+				 (set! tt (list tt)))
+			     (if (and (list? tt)
+			     	      (list? (car tt))
+				      (not (atom? gt)))
+			     	 (set! tt (car tt)))
+			     (if (atom? gt)
+				 (set! gt (list gt)))
+			     
+			     ;(println 'changed: 'tt: tt 'gt: gt)
+
+			     ;; if gt and tt still not equal tt maybe a named-type
+			     (if (<> (length gt) (length tt))
+				 (if (and (string? (car tt)) ;; named type?
+					  (= (length gt) (length (impc:ir:get-type-from-str (llvm:get-named-type (car tt))))))
+				     (set! tt (impc:ir:get-type-from-str (llvm:get-named-type (car tt))))
+				     (print-error 'Compiler 'Error: 'type 'mismatch 'in 'generics gt '- tt)))
+
+			     ;; we might be able to update-vars based by matching our request 'gt vs our result 'tt
+			     (for-each
+			      (lambda (aa bb)
+				;(println 'sub: aa bb)
+				(if (and (atom? aa)
+					 (symbol? aa)
+					 (regex:match? (symbol->string aa) "!"))
+				    (begin ;(println 'generic-match-b-! aa bb)
+					   (if (and (symbol? bb) (assoc bb vars))
+					       (impc:ti:update-var aa vars kts (cdr (assoc bb vars))) ;; (list bb))
+					       ;; (let ((val (cdr (assoc bb vars))))
+					       ;; 	 (if (impc:ir:type? val)
+					       ;; 	     (impc:ti:update-var aa vars kts val)))
+					       (if (not (symbol? bb))
+						   (impc:ti:update-var aa vars kts (list bb)))))))
+				  gt tt)
+			     ; (println 'avars3: (assoc a vars))
+			     ;(println 'tt: tt)
+			     tt))
+			     ;(list tt)))
+	 		 (cdr ast)
+	 		 (cddr gpoly-type))))
+	   
+	   ;; (println 'request? request? 'gpoly-type: (cadr gpoly-type) 'res: res)
+	   ;; (println 'mid: vars)
+	   ;; (println 'args: res)
+
+	   ;; check to see if for-each is possible (i.e. request and (cadr gpoly-type)) are same length
+	   (if (list? request?)
+	       (if (and (list? (cadr gpoly-type))
+			(<> (length request?) (length (cadr gpoly-type))))
+		   (set! request? #f))
+	       ;; (if (or (not (list? (cadr gpoly-type)))
+	       ;; 	       (<> (length request?) (length (cadr gpoly-type))))
+	       ;; 	   (set! request? #f))
+	       (if (list? (cadr gpoly-type))
+		   (if (and (string? request?) ;; named type?
+			    (= (length (cadr gpoly-type)) (length (impc:ir:get-type-from-str (llvm:get-named-type request?)))))
+		       (set! request? (impc:ir:get-type-from-str (llvm:get-named-type request?)))
+		       (set! request? #f))
+		   (if (<> (length (list request?)) (length (list (cadr gpoly-type))))
+		       (set! request? #f))))
+	   
+	   ;(println 'request: request?)
+	   ;(println 'request: request? (cadr gpoly-type))
+
+	   ;; (if request?
+	   ;;     (for-each
+	   ;; 	(lambda (aa bb)
+	   ;; 	  ;; (println 'aa: aa 'bb: bb)
+	   ;; 	  (if (and (atom? aa)
+	   ;; 		   (symbol? aa)
+	   ;; 		   (regex:match? (symbol->string aa) "!"))
+	   ;; 	      (begin ;(println 'generic-match-r-! aa bb)
+	   ;; 		     (if (symbol? bb)
+	   ;; 			 (impc:ti:update-var aa vars kts bb) ;(cdr (assoc bb vars)))
+	   ;; 			 (impc:ti:update-var aa vars kts bb)))))
+	   ;; 	(if (atom? request?)
+	   ;; 	    (list (cadr gpoly-type))
+	   ;; 	    (cadr gpoly-type))
+	   ;; 	(if (atom? request?)
+	   ;; 	    (list request?)
+	   ;; 	    request?)))
+
+	   (if request?
+	       (if (and (list? request?)
+			(atom? (cadr gpoly-type))
+			(symbol? (cadr gpoly-type)))
+		   (impc:ti:update-var (cadr gpoly-type) vars kts request?)
+		   (for-each
+		    (lambda (aa bb)
+		      ;; (println 'aa: aa 'bb: bb)
+		      (if (and (atom? aa)
+			       (symbol? aa)
+			       (regex:match? (symbol->string aa) "!"))
+			  (begin ;(println 'generic-match-r-! aa bb)
+			    (if (symbol? bb)
+				(impc:ti:update-var aa vars kts bb) ;(cdr (assoc bb vars)))
+				(impc:ti:update-var aa vars kts bb)))))
+		    (if (atom? request?)
+			(list (cadr gpoly-type))
+			(cadr gpoly-type))
+		    (if (atom? request?)
+			(list request?)
+			request?))))
+
+	   ;; if request? is not a fully formed type
+	   ;; then we will stick to the the current poly type
+	   (if (not (impc:ir:type? request?))
+	       (set! request? #f))
+
+	   ;; (if request?
+	   ;;     (println 'gnativeupdate: (car ast) '->
+	   ;; 		(list (cons (+ *impc:ir:closure* (* 2 *impc:ir:pointer*))
+	   ;; 			    (cons (list request?) res))))
+	   ;;     (println 'gnativeupdate: (car ast) '->
+	   ;; 		(list (cons (+ *impc:ir:closure* (* 2 *impc:ir:pointer*))
+	   ;; 			    (cons (list (cadr gpoly-type)) res)))))
+		       
+
+	   ;; set generic functions type ( (cadr gpoly-type)|request? + res) 
+	   (if request?
+	       (let ((val (list (cons (+ *impc:ir:closure* (* 2 *impc:ir:pointer*))
+				      (cons (list request?) res)))))
+		 (impc:ti:update-var (car ast) vars kts val))
+	       (let ((val (list (cons (+ *impc:ir:closure* (* 2 *impc:ir:pointer*))
+				      (cons (list (cadr gpoly-type)) res)))))		 
+		 (impc:ti:update-var (car ast) vars kts val)))
+	   )
+	 ;(println 'generic-ret: vars)
+	 ;(println 'generic-function-signature: (assoc (car ast) vars))
+	 ;; return request? or (cadr gpoly-type if no request was made
+	 (if request?
+	     (list request?)
+	     (list (cadr gpoly-type))))))
+
+
+
 ;; polymorphic version
 (define impc:ti:nativef-poly-check
    (lambda (ast vars kts request?)
-      ;(println 'poly-check 'ast: ast 'vars: vars 'request: request?)     
-      (let* ((polyf (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$"))))
+      ;(println 'poly-check 'ast: ast 'vars: vars 'request: request?)
+      (let* ((polyf (string->symbol (car (regex:split (symbol->string (car ast)) "##")))) ;"\\$\\$\\$"))))
  	     (ftypes (impc:ir:poly-types polyf))
 	     (valid-lgth (map (lambda (type)
 				(if (<> (length (cdr type))
@@ -1020,8 +1849,9 @@
 				(if valid
 				    (let* ((checked-types
 					    (map (lambda (a t)
-						   ;(println 'a: a 't: t)
-						   (impc:ti:type-check a vars kts t))
+						   (let ((t2 (impc:ti:type-check a vars kts t)))
+						     ;(println 'a: a 't: t 't2: t2)
+						     t2))
 						 (cdr ast)
 						 (cddr type)))
 					   (ct2 (map (lambda (ct ft) ;; checked type against poly type
@@ -1036,7 +1866,6 @@
 						     checked-types
 						     (cddr type))))
 				      ;(println 'ct: ct2 'checked: checked-types)
-				      ;(println '__checked-types checked-types (cdr (cdadr type)) ct2)
 				      (if (member #f ct2) #f #t))
 				    #f))
 			      ftypes
@@ -1047,19 +1876,23 @@
 				       ftypes
 				       valid-args))))
 	
+	;; (println '-> ast 'valid-polys: valid-polys 'request: request?)	
 	(if (null? valid-polys)
 	    (print-error 'Compiler 'Error: 'no 'valid 'polymorphic 'options 'for: ast))
-
-	;(println ast 'valid-polys: valid-polys 'request: request?)
+	
+	;; (println 'valid-polysa: valid-polys 'request? request? 'ast: ast)
 	
 	(let ((returns (map (lambda (t)
 			      (cadr t))
 			    valid-polys)))
+	  ;(println 'returnsa: returns 'request? request?)
 	  (if request?
-	      (begin (if (atom? request?)
-			 (set! request? (list request?)))
-		     (set! returns (impc:ti:intersection* returns request?))))
-
+	      ;; (begin (if (atom? request?)
+	      ;; 		 (set! request? (list request?)))
+	      (set! returns (impc:ti:intersection* returns (list request?))))
+	  
+	  ;(println 'returns: returns)
+	  
 	  (set! valid-polys (cl:remove #f
 			       (map (lambda (v)
 				      (if (member (cadr v) returns)
@@ -1067,14 +1900,11 @@
 					  #f))
 				    valid-polys)))
 	  ;; update valid-polys to reflect return types (from request?)
-	  ;(println 'valid-polys: valid-polys 'request? request? 'ast: ast) 
+	  ;(println 'valid-polysb: valid-polys 'request? request? 'ast: ast) 
 	  (impc:ti:update-var (car ast) vars kts valid-polys)
-
+	  
 	  ;(println 'returns: returns)
 	  returns))))
-
-	  
-      
 
 
 (define impc:ti:callback-check
@@ -1119,8 +1949,10 @@
 
 (define impc:ti:let-check
    (lambda (ast vars kts request?)
+      ;(println 'vars: vars '(cadr ast) (cadr ast))
       ;; for the symbols we want to set each return type
       (for-each (lambda (e)
+		  ;(println 'e: e)
 		  (let ((a (impc:ti:type-check (cadr e) vars kts
 					       (if (member (car e) kts)
 						   (cadr (assoc (car e) vars))
@@ -1130,31 +1962,39 @@
                 (cadr ast))
       ;; then return the return type for the whole let
       ;; which should have a begin body! so caddr should work
-      (impc:ti:type-check (caddr ast) vars kts request?)))
+      ;(println 'letvars: vars)
+      (let ((ret (impc:ti:type-check (caddr ast) vars kts request?)))
+	;(println 'letret: ret)
+	ret)))
+
 	  
 
 (define impc:ti:null?-check
    (lambda (ast vars kts request?)
+     ;;(println 'nullcheck)
       (let ((a (impc:ti:type-check (cadr ast) vars kts request?)))
-	;(println 'a: a 'ast: ast 'car: (impc:ir:pointer? (car a)))
-	(if (if (not (impc:ir:type? a))
-		(impc:ir:pointer? (car a))
-		(impc:ir:pointer? a))
+	(if (null? a) ;; couldn't resolve yet!
 	    (list *impc:ir:i1*)
-	    (print-error 'Compiler 'Error: 'null? 'must 'take 'a 'pointer 'type (sexpr->string ast))))))
+	    (if (if (not (impc:ir:type? a))		
+		    (impc:ir:pointer? (car a))
+		    (impc:ir:pointer? a))
+		(list *impc:ir:i1*)
+		(print-error 'Compiler 'Error: 'null? 'must 'take 'a 'pointer 'type (sexpr->string ast)))))))
 
 
 (define impc:ti:null-check
    (lambda (ast vars kts request?)
      ;(println 'null-check 'ast: ast 'request? request?)
-     (if (and request?
+     (if (and request?	      
 	      (impc:ir:pointer? request?))
-	 request?
+	 (list request?)
 	 (list (+ *impc:ir:pointer* *impc:ir:si8*)))))
 
 
 (define impc:ti:ret-check
    (lambda (ast vars kts request?)
+      ;(println 'retcheck: request?)
+      ;(println 'ast: ast)
       ;; grab function name from ret->
       (let* ((sym (if (equal? (caddr ast) (cadr ast))
                       '()
@@ -1172,8 +2012,10 @@
                                     (if (and t
                                              (impc:ir:type? t)
                                              (impc:ir:closure? t))
-					(if (list? t) (cadr t) #f)
-                                        #f)))) ;; or else pass #f
+					(if (list? t) (cadr t) request?)  
+                                        ;#f)))) ;; or else pass #f
+	                                request?)))) ;; or pass on request
+	 ;;(println 'retchecked-> a 'request? request?)
          ;; if t is not a closure type we have a problem!
          (if (and t
                   (or (not (list? t));(not (impc:ir:type? t))
@@ -1211,20 +2053,24 @@
 
 (define impc:ti:if-check
    (lambda (ast vars kts request?)
-      (let* ((a (impc:ti:type-check (cadr ast) vars kts request?))
-             (b (impc:ti:type-check (caddr ast) vars kts request?))
+      ;(println 'if: ast 'request? request?)
+      (let* ((a (impc:ti:type-check (cadr ast) vars kts #f)) ;request?))
+             (b (impc:ti:type-check (caddr ast) vars kts request?))	     
              (c (if (null? (cdddr ast))
 		    '()
 		    (impc:ti:type-check (cadddr ast) vars kts request?)))
-             (t (cl:intersection (if (atom? b) (list b) b) (if (atom? c) (list c) c))))
+	     (t (impc:ti:type-unify (list b c) vars)))
+             ;(t (cl:intersection (if (atom? b) (list b) b) (if (atom? c) (list c) c))))
          (if *impc:ti:print-sub-checks* (println 'if:> 'a: a 'b: b 'c: c 't: t))
+	 ;(println 'a: a 'b: b 'c: c 't: t)
          (if (null? b)
              (set! t c))
          (if (null? c)
              (set! t b))
+	 ;(println '-> 'a: a 'b: b 'c: c 't: t)
          ;; return intersection of b and c
-         (if (null? t) 
-             (print-error 'Compiler 'Error: 'cannot 'unify 'then (map (lambda (v) (impc:ir:get-type-str v)) b) 'and 'else (map (lambda (v) (impc:ir:get-type-str v)) c) 'clauses 'in ast)
+         (if (null? t)
+             (print-error 'Compiler 'Error: 'cannot 'unify 'then b 'and 'else c 'in ast) ;(map (lambda (v) (impc:ir:get-type-str v)) b) 'and 'else (map (lambda (v) (impc:ir:get-type-str v)) c) 'clauses 'in ast)
              t))))
 
 ;; ;; make-array should be of the form
@@ -1254,7 +2100,7 @@
    (lambda (ast vars kts request?)
      (if (<> (length ast) 4)
 	 (print-error 'Compiler 'Error: 'error 'parsing (atom->string (car ast)) 'incorrect 'number 'of 'arguments))
-     (let* ((a (impc:ti:type-check (cadr ast) vars kts request?))
+     (let* ((a (impc:ti:type-check (cadr ast) vars kts '())) ;request?))
 	    ;; b should be fixed point types
 	    (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*)))
 	    ;; c should be of type a*
@@ -1265,7 +2111,8 @@
 								 (list (impc:ir:pointer-- (car a))))))))
        (if (or (and (not (null? a))
 		    (not (impc:ir:array? (car a))))
-	       (> (impc:ir:get-ptr-depth (car a)) 1))	   
+	       (and (not (null? a))
+		    (> (impc:ir:get-ptr-depth (car a)) 1)))
 	   (print-error 'Compiler 'Error: 'invalid 'aset! 'type (impc:ir:get-type-str (car a))))
        ;; array set check will return the value set
        c)))
@@ -1273,10 +2120,10 @@
 
 (define impc:ti:array-ref-ptr-check
    (lambda (ast vars kts request?)
-      (let ((a (impc:ti:type-check (cadr ast) vars kts request?))
+      (let ((a (impc:ti:type-check (cadr ast) vars kts '())) ;request?))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
-	(if (impc:ir:type? a) (set! a (list a)))	
+	(if (impc:ir:type? a) (set! a (list a)))
 	(if (null? a) 
 	    a
 	    (if (or (not (impc:ir:array? (car a)))
@@ -1287,8 +2134,9 @@
 
 (define impc:ti:array-ref-check
    (lambda (ast vars kts request?)
+      ;(println 'request? request?)
       ;(println 'array-ref-check: 'ast: ast 'vars: vars 'kts: kts)
-      (let ((a (impc:ti:type-check (cadr ast) vars kts request?))
+      (let ((a (impc:ti:type-check (cadr ast) vars kts '()))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
 	(if (impc:ir:type? a) (set! a (list a)))
@@ -1298,6 +2146,40 @@
 		     (> (impc:ir:get-ptr-depth (car a)) 1))
 		 (print-error 'Compiler 'Error: 'invalid 'array-ref 'type (impc:ir:get-type-str (car a)) 'in ast)
 		 (list (caddr (car a))))))))
+
+(define impc:ti:vector-set-check
+   (lambda (ast vars kts request?)
+     ;(println 'ast: ast 'vars: vars)
+     (if (<> (length ast) 4)
+	 (print-error 'Compiler 'Error: 'error 'parsing (atom->string (car ast)) 'incorrect 'number 'of 'arguments))
+     (let* ((a (impc:ti:type-check (cadr ast) vars kts '())) ;request?))
+	    ;; b should be i32
+	    (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si32*)))
+	    ;; c should be of type a*
+	    (c (impc:ti:type-check (cadddr ast) vars kts (if (null? a) #f (list (caddr (car a)))))))
+       (if (or (and (not (null? a))
+		    (not (impc:ir:vector? (car a))))
+	       (and (not (null? a))
+		    (> (impc:ir:get-ptr-depth (car a)) 1)))
+	   (print-error 'Compiler 'Error: 'invalid 'vset! 'type (impc:ir:get-type-str (car a))))
+       ;; vector set returns a whole new vector!  check llvm ir doc
+       a)))
+
+(define impc:ti:vector-ref-check
+   (lambda (ast vars kts request?)
+      ;(println 'request? request?)
+      ;(println 'vector-ref-check: 'ast: ast 'vars: vars 'kts: kts)
+      (let ((a (impc:ti:type-check (cadr ast) vars kts '()))
+            ;; b should be i32
+            (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si32*))))
+	(if (impc:ir:type? a) (set! a (list a)))
+	(if (null? a) 
+             a
+	     (if (or (not (impc:ir:vector? (car a)))
+		     (> (impc:ir:get-ptr-depth (car a)) 1))
+		 (print-error 'Compiler 'Error: 'invalid 'vector-ref 'type (impc:ir:get-type-str (car a)) 'in ast)
+		 (list (caddr (car a))))))))
+
 
 
 (define impc:ti:pointer-set-check
@@ -1331,11 +2213,12 @@
 
 (define impc:ti:pointer-ref-check
    (lambda (ast vars kts request?)
-      ;(println 'array-ref-check: 'ast: ast 'vars: vars 'kts: kts)
-      (let ((a (impc:ti:type-check (cadr ast) vars kts request?))
+      ;(println 'pointer-ref-check: 'ast: ast 'request? request?) ;'vars: vars 'kts: kts)
+      (let ((a (impc:ti:type-check (cadr ast) vars kts '())) ;request?))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
 	(if (impc:ir:type? a) (set! a (list a)))
+	;(println 'a: a 'b: b)
 	(if (null? a) 
              a
              (if (impc:ir:array? (car a))
@@ -1357,6 +2240,15 @@
 	(if (null? a) a
 	    (impc:ir:pointer++ a)))))
 
+;; make should be of the form
+;; (halloc type)
+;; where type is a valid type
+;; (nalloc i64)
+;; memory is allocated on the head 
+(define impc:ti:heap-alloc-check
+   (lambda (ast vars kts request?)
+     request?))
+
 
 ;; make should be of the form
 ;; (make type)
@@ -1366,10 +2258,29 @@
 (define impc:ti:zone-alloc-check
    (lambda (ast vars kts request?)
       ;; make should return a ptr to type a
-      (let ((a (impc:ir:convert-from-pretty-types (if (< (length ast) 3) (cadr ast) (caddr ast)))))
-         ;; returns a pointer of tuple type 'a'
-	(if (null? a) a
-	    (impc:ir:pointer++ a)))))
+     (let ((a (impc:ir:convert-from-pretty-types (if (< (length ast) 3) (cadr ast) (caddr ast)))))
+       ;(println 'zone-alloc-check 'a: a 'request: request?)
+       ;; returns a pointer of tuple type 'a'
+       (if (null? a) a
+	   (impc:ir:pointer++ a)))))
+
+;; make should be of the form
+;; (alloc type)
+;; where type is a valid type
+;; (alloc i64)
+;; memory is allocated on the head 
+(define impc:ti:zone-alloc-check
+   (lambda (ast vars kts request?)
+     request?))
+
+     ;; (if (null? (cdr ast))
+     ;; 	 request?
+     ;; 	 ;; make should return a ptr to type a
+     ;; 	 (let ((a (impc:ir:convert-from-pretty-types (if (< (length ast) 3) (cadr ast) (caddr ast)))))
+     ;; 	   (println 'zone-alloc-check 'a: a 'request: request?)
+     ;; 	   ;; returns a pointer of tuple type 'a'
+     ;; 	   (if (null? a) a
+     ;; 	       (impc:ir:pointer++ a))))))
 
 
 ;; make should be of the form
@@ -1386,6 +2297,19 @@
 	    (impc:ir:pointer++ a)))))
 
 
+;; make should be of the form
+;; (salloc type)
+;; where type is a valid type
+;; (salloc i64)
+;; memory is allocated on the head 
+(define impc:ti:stack-alloc-check
+   (lambda (ast vars kts request?)
+     request?))
+
+
+
+
+
 ;; ;; make-tuple should be of the form
 ;; ;; (make-tuple type type type ...)
 ;; ;; where types are valid types
@@ -1400,14 +2324,15 @@
 
 (define impc:ti:get-tuple-type-from-name
   (lambda (str)
-    (let ((t (llvm:get-named-type (substring (impc:ir:get-base-type (car res))					     
+    (let ((t (llvm:get-named-type (substring (impc:ir:get-base-type (car res))
 					     1
 					     (string-length (impc:ir:get-base-type (car res)))))))
       (dotimes (i (impc:ir:get-ptr-depth str)) (set! t (impc:ir:pointer++ t)))
       t)))
 
 (define impc:ti:tuple-set-check
-   (lambda (ast vars kts request?)            
+   (lambda (ast vars kts request?)
+      ;(println 'tsetcheck ast) ; vars kts request?)
       (if (< (length ast) 4)
           (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
       ;; (caddr ast) must be an integer 
@@ -1415,27 +2340,46 @@
           (print-error 'Compiler 'Error: 'tuple-set! 'must 'use 'a 'literal 'integer 'index! ast))
       (let* (;; a should be a tuple of some kind
              (a (let ((res (impc:ti:type-check (cadr ast) vars kts request?)))
-		  (if (and (string? (car res))
-			   (char=? (string-ref (car res) 0) #\%))
-		      (let ((t (llvm:get-named-type (substring (impc:ir:get-base-type (car res))
-							       1
-							       (string-length (impc:ir:get-base-type (car res)))))))
-			(dotimes (i (impc:ir:get-ptr-depth (car res))) (set! t (impc:ir:pointer++ t)))
-			(list (impc:ir:get-type-from-str t)))
-		      res)))  
+		  (if (null? res) res
+		      (if (and (string? (car res))
+			       (char=? (string-ref (car res) 0) #\%))
+			  (let ((t (llvm:get-named-type (substring (impc:ir:get-base-type (car res))
+								   1
+								   (string-length (impc:ir:get-base-type (car res)))))))
+			    (dotimes (i (impc:ir:get-ptr-depth (car res))) (set! t (impc:ir:pointer++ t)))
+			    (list (impc:ir:get-type-from-str t)))
+			  res))))
              ;; b should be 32bit fixed point type -- llvm structs only support 32bit indexes
              (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si32*)))
+	     (req? (if (and (not (null? a))
+			    (list? a))
+		       (if (impc:ir:tuple? (car a))
+			   (list-ref (car a) (+ 1 (caddr ast)))
+			   #f)
+		       #f))
+	     ;(llllll (println 'req: req?  'cara: (car a) 'z: (caddr ast) 'list-ref: (+ 1 (caddr ast))))
              ;; c should be an element of a tuple
-             (c (impc:ti:type-check (cadddr ast) vars kts
-                                    (if (and (not (null? a))
-                                             (list? a))
-                                        (if (impc:ir:tuple? (car a))
-                                            (list-ref (car a) (+ 1 (caddr ast)))
-                                            #f)
-                                        #f))))
-	(if (not (null? a))
-	    (and (not (impc:ir:tuple? (car a)))
-		 (print-error 'Compiler 'Error: 'invalid 'tuple-set-check 'type (impc:ir:get-type-str (car a)))))
+             (c (impc:ti:type-check (cadddr ast) vars kts req?)))
+                                    ;; (if (and (not (null? a))
+                                    ;;          (list? a))
+                                    ;;     (if (impc:ir:tuple? (car a))
+                                    ;;         (list-ref (car a) (+ 1 (caddr ast)))
+                                    ;;         #f)
+                                    ;;     #f))))
+	(if (and (not (null? a))
+		 (not (impc:ir:tuple? (car a))))
+	    (print-error 'Compiler 'Error: 'invalid 'tuple-set-check 'type (impc:ir:get-type-str (car a))))
+	;; if (cadddr ast) is a symbol we should update
+	;; it's type with c but for polymorphic cases
+	;; we should ensure that we also do a type-unification
+	(if (symbol? (cadddr ast))
+	    (let* ((types (cdr (assoc (cadddr ast) vars)))
+		   (utype (impc:ti:type-unify (list c types) vars)))
+	      ;(println 'types: types 'utype: utype 'c: (list c types))
+	      (if (null? utype)
+		  (impc:ti:force-var (cadddr ast) vars kts (list c))
+		  (impc:ti:force-var (cadddr ast) vars kts (list utype)))))
+	      	
 	;; tuple set check will return the type of the value set
 	c)))
 
@@ -1473,19 +2417,20 @@
 
 (define impc:ti:tuple-ref-check
    (lambda (ast vars kts request?)
-     ;(println 'ref-check ast kts vars)
+      ;; (println 'ref-check ast request?) ;kts vars)
       ;; (caddr ast) must be an integer    
       (if (not (integer? (caddr ast))) 
           (print-error 'Compiler 'Error: 'tuple-ref 'must 'use 'a 'literal 'integer 'index! ast))
       (let* (; a should be a tuple of some kind!
-            (a (impc:ti:type-check (cadr ast) vars kts (if (impc:ir:type? request?)
-							   (impc:ir:tuple? request?)
+            (a (impc:ti:type-check (cadr ast) vars kts (if (and (impc:ir:type? request?)
+								(impc:ir:tuple? request?))
 							   request? 
 							   #f))) ;request?))
             ;; b should be fixed point -- llvm structs only support 32bit indexes
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si32*))))
 	(if (impc:ir:type? a)
 	    (set! a (list a)))
+	;(println 'a: a)
 	;; check for named types
 	(if (and (not (null? a))
 		 (string? (car a)))
@@ -1509,7 +2454,7 @@
 ;;(closure-set! closure a i32 5)
 (define impc:ti:closure-set-check
    (lambda (ast vars kts request?)   
-     (println 'ast: ast)
+      ;(println 'ast: ast)
       (if (< (length ast) 5)
           (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
       (let* (;; a should be a closure of some kind
@@ -1585,7 +2530,7 @@
 
 
 (define impc:ti:set-check
-   (lambda (ast vars kts request?)      
+   (lambda (ast vars kts request?)
       (let* ((sym (impc:ti:get-var (cadr ast) vars))
              (a (impc:ti:type-check (caddr ast) vars kts (cdr sym))))
          (if *impc:ti:print-sub-checks* (println 'set!:> 'ast: ast 'a: a))
@@ -1598,7 +2543,7 @@
    (lambda (ast vars kts request?)      
       (let* ((a (impc:ti:type-check (cadr ast) vars kts request?)))
          (if *impc:ti:print-sub-checks* (println 'ptrref:> 'ast: ast 'a: a))
-	 ;; return type of ptrref is 'a' dereferenced
+	 ;; return type of ptrref is 'a' dereferenced'
 	 (if (list? a)
 	     (set! a (car a)))
 	 (if (and (impc:ir:type? a)
@@ -1622,13 +2567,15 @@
 
 (define impc:ti:lambda-check
    (lambda (ast vars kts request?)
-     ;(println 'lcheck: 'ast: ast 'request? request? 'vars: vars 'kts: kts)
+     ;(println 'lcheck: ast 'request? request?) ;'ast: ast 'request? request? 'vars: vars 'kts: kts)
+     ;(error)
      ;; first we check if a type request has been made
      (if (and (impc:ir:type? request?)
 	      (impc:ir:closure? request?))
 	        ;; if there is a request then cycle through 
 	        ;; and set lambda arg symbols
 	 (begin (map (lambda (sym req)
+		       ;(println 'sym: sym 'req: req)
 		       (if (symbol? sym)
 			   (impc:ti:update-var sym vars kts req)))
 		     (cadr ast)
@@ -1637,21 +2584,28 @@
 		(set! request? (cadr request?))))
       ;; run body for type coverage     
       ;; grab the last result as return type
+      ;(println 'aaaa: (caddr ast))
+      ;(println 'vars: vars)
       (let ((res (impc:ti:type-check (caddr ast) vars kts request?)))
+	 ;(println 'bbbb: res '-> request? request?) ;  '-> (caddr ast))
          ;; if we have a choice between numeric options we force one!
-         (if (and (list? res)
+         (if (and (not (impc:ti:complex-type? res))
+		  (list? res)
 		  (> (length res) 1)
 		  (not (member #f (map (lambda (t) (impc:ir:floating-point? t)) res))))
              (set! res (list *impc:ir:double*))) ;; force doubles
-         (if (and (list? res)
+         (if (and (not (impc:ti:complex-type? res))
+		  (list? res)
 		  (> (length res) 1)
 		  (not (member #f (map (lambda (t) (impc:ir:fixed-point? t)) res))))
              (set! res (list *impc:ir:si64*))) ;; force i64
+	 ;(println 'cccc: res)
          ;; return lambda type which is made up of
          ;; argument symbols plus return type from last body expression         
          (let ((ret (list (impc:ir:pointer++ (impc:ir:pointer++ (list* *impc:ir:closure* res (cadr ast)))))))
-            ;(print 'return 'ret: ret 'from 'ast ast) 
-            ret))))
+	   ;(println 'ret: ret 'vars: vars)
+	   ;(println 'lambdas-return-type: (impc:ti:type-unify ret vars))
+	   (impc:ti:type-unify ret vars)))))
 			
 
 ;; whenever a closure is called we calculate a type for it
@@ -1665,14 +2619,24 @@
                         (if (llvm:get-globalvar (symbol->string (car ast)))
                             (list (impc:ir:get-type-from-str (llvm:get-global-variable-type (symbol->string (car ast)))))
                             (print-error 'Compiler 'Error: 'no 'closure 'named: (car ast)))))
+	     ;(llllllll (println 'ctype: ctype))
              ;; get argument expression types
              (res (map (lambda (e t)
+			  ;(println 'e: e 't: t)
                           (let ((res (impc:ti:type-check e vars kts
                                                          (if (symbol? t) 
                                                              (impc:ti:symbol-check t vars kts #f)
                                                              t))))
                              ;; if t is a symbol then add res to t
-                             (if (symbol? t) (impc:ti:update-var t vars kts res))
+			     (if (symbol? t)
+				 (if (or (and (list? res)
+					      (impc:ir:type? (car res)))
+					 (impc:ir:type? res))
+				     (impc:ti:force-var t vars kts res)
+				     ;(impc:ti:update-var t vars kts res)
+				     (impc:ti:update-var t vars kts res)))
+                             ;(if (symbol? t) (impc:ti:update-var t vars kts res))
+
                              res))
                        (cdr ast)
                        (if (or (null? ctype) 
@@ -1683,21 +2647,40 @@
                                    (length (cdr ast)))
                                (print-error 'Compiler 'Error: 'bad 'arity 'for ast)
                                (cddr (car ctype))))))
+	     ;; (lllll (println 'res: res 'from (car ast) 'request? request?))
+	     
              ;; if there was a request that will be the return type
              ;; otherwise if we already have a type defined we can use it's return type
              ;; otherwise we cannot know it
-             (ret (if (and request?
-                           (not (null? request?)))
-                      request?
-                      (if (or (null? ctype) 
-                              (not (impc:ir:closure? (car ctype))))
-                          '()
-                          (cadr (car ctype))))))         
+	     
+             ;; (ret (if (and request?
+             ;;               (not (null? request?)))
+             ;;          request?
+             ;;          (if (or (null? ctype) 
+             ;;                  (not (impc:ir:closure? (car ctype))))
+             ;;              '()
+             ;;              (cadr (car ctype))))))
+
+	     ;; if we already have a type defined we can use it's return type
+	     ;; otherwise
+             ;; if there was a request that will be the return type
+             ;; otherwise we cannot know it
+             (ret (if (and (not (null? ctype))
+			   (impc:ir:closure? (car ctype)))
+		      (cadr (car ctype))
+		      (if (and request?
+			       (not (null? request?)))
+			  request?
+			  '()))))
+
          (if *impc:ti:print-sub-checks* (println 'closure:> 'ast: ast 'res: res 'ret: ret))
          ; set the closure type for the symbol (if not a global var)
-         (if (assoc (car ast) vars)
-             (impc:ti:update-var (car ast) vars kts
-                                 (list (impc:ir:pointer++ (impc:ir:pointer++ (list* *impc:ir:closure* ret res))))))
+	 ;(if (not (null? ret))
+	 ;(println 'setting-closure-type: (list (impc:ir:pointer++ (impc:ir:pointer++ (list* *impc:ir:closure* ret res)))))
+	 (if (assoc (car ast) vars)
+	     (impc:ti:update-var (car ast) vars kts
+				 (list (impc:ir:pointer++ (impc:ir:pointer++ (list* *impc:ir:closure* ret res))))))
+	 ;(println 'return: ret 'request? request?) ; 'from (car ast) 'vars: vars)
          ; and return the new closure's return type
          (if (list? ret) ret
              (list ret)))))
@@ -1766,11 +2749,12 @@
       ;; first check return type of car ast (which will be a closure)
       ;; then check against it's arg types
       (let ((type (impc:ti:type-check (car ast) vars kts request?)))
-        ;(println 'closure-in-first-pos: ast 'type: type)
+	(if (null? type)
+	    (print-error 'Compiler 'Error: 'Bad 'type 'for 'closure 'expression ast))
 	(if (not (impc:ir:type? type))
 	    (set! type (car type)))
 	(if (<> (+ *impc:ir:closure* *impc:ir:pointer* *impc:ir:pointer*) (car type))
-	    (begin (print-error 'Invalid 'Expression ast) (error ""))
+	    (print-error 'Compiler Error: 'Bad 'type 'for 'closure 'expression ast)
 	    (begin (map (lambda (a b) 
 			  (impc:ti:type-check b vars kts a))
 			(cddr type)
@@ -1780,7 +2764,9 @@
 ;; vars is statefull and will be modified in place
 (define impc:ti:type-check
    (lambda (ast vars kts request?)
-      ;(println 'type-check: ast  'vars: vars  'kts: kts)
+      ;(println 'tc: ast)
+      ;(println 'l1: (assoc 'l1 vars))
+      ;(println 'type-check: ast  'vars: vars  'kts: kts 'request? request?)
       (if *impc:ti:print-main-check* (println 'type-check: ast 'kts: kts 'request? request?))
       (if *impc:ti:print-main-check* (println 'vars------: vars))
       (cond ((null? ast) '())
@@ -1790,14 +2776,16 @@
             ((atom? ast) (print-error 'Compiler 'Error: 'internal 'error 'unhandled 'atom: ast))
             ((and (list? ast) (member (car ast) '(let let* letrec))) (impc:ti:let-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(lambda))) (impc:ti:lambda-check ast vars kts request?))
-	    ((and (list? ast) (member (car ast) '(* / + - modulo bitwise-and bitwise-or bitwise-eor bitwise-shift-left bitwise-shift-right bitwise-not))) (impc:ti:math-check ast vars kts request?))
+	    ((and (list? ast) (member (car ast) '(* / + - % modulo bitwise-and bitwise-or bitwise-eor bitwise-shift-left bitwise-shift-right bitwise-not))) (impc:ti:math-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(< > = <>))) (impc:ti:compare-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(dotimes))) (impc:ti:dotimes-check ast vars kts request?))            
             ((and (list? ast) (member (car ast) '(llvm_printf))) (impc:ti:printf-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(memzone))) (impc:ti:memzone-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(callback))) (impc:ti:callback-check ast vars kts request?))	    
             ((and (list? ast) (member (car ast) '(llvm_sprintf))) (impc:ti:sprintf-check ast vars kts request?))
-            ;((and (list? ast) (member (car ast) '(make-array))) (impc:ti:make-array-check ast vars kts request?))  
+            ;((and (list? ast) (member (car ast) '(make-array))) (impc:ti:make-array-check ast vars kts request?))
+            ((and (list? ast) (member (car ast) '(vector-set!))) (impc:ti:vector-set-check ast vars kts request?))
+            ((and (list? ast) (member (car ast) '(vector-ref))) (impc:ti:vector-ref-check ast vars kts request?))	    
             ((and (list? ast) (member (car ast) '(array-set!))) (impc:ti:array-set-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(array-ref))) (impc:ti:array-ref-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(array-ref-ptr))) (impc:ti:array-ref-ptr-check ast vars kts request?))
@@ -1819,10 +2807,18 @@
 	    ((and (list? ast) (member (car ast) '(impc_null))) (impc:ti:null-check ast vars kts request?))
 	    ((and (list? ast) (member (car ast) '(bitcast))) (impc:ti:bitcast-check ast vars kts request?))
 	    ((and (list? ast) (member (car ast) '(void))) (impc:ti:void-check ast vars kts request?))
+	    ((and (list? ast) ;; generic function		  
+		  (symbol? (car ast))
+		  (regex:match? (symbol->string (car ast)) "##") ;"\\$\\$\\$")
+		  (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "##"))))) ;"\\$\\$\\$")))))
+		  ;; (impc:ir:gpoly-types (car ast)))
+	     ;(println 'generic (car ast))
+	     (impc:ti:nativef-generics ast vars kts request?))
             ((and (list? ast) ;; polymorphic function
                   (symbol? (car ast))
-		  (regex:match? (symbol->string (car ast)) "\\$\\$\\$")
-                  (impc:ir:poly-types (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")))))
+		  (regex:match? (symbol->string (car ast)) "##") ;"\\$\\$\\$")
+                  (impc:ir:poly-types (string->symbol (car (regex:split (symbol->string (car ast)) "##"))))) ;"\\$\\$\\$")))))
+	     ;(println 'poly (car ast))
              (let ((reses (impc:ti:nativef-poly-check ast vars kts request?)))
 	       ;(println 'ast: ast reses)
 	       reses))
@@ -1851,7 +2847,7 @@
                                               (if (null? (cdr x)) #f
                                                   (if (and (list? (cdr x)) ;; check there are multiple choices
                                                            (not (member (modulo (cadr x) *impc:ir:pointer*) 
-                                                                        (list *impc:ir:tuple* *impc:ir:closure* *impc:ir:array*))) ;; make sure it's a base type (not closure or tuple)
+                                                                        (list *impc:ir:tuple* *impc:ir:closure* *impc:ir:array* *impc:ir:vector*))) ;; make sure it's a base type (not closure or tuple)
                                                            (cl:every impc:ir:type? (cdr x))) ;; check that it's choices are valid (not null)
                                                       x #f)))
                                            union))))
@@ -1867,7 +2863,7 @@
       ;(println '------------------------------------)
       ;(println 'forced-types forced-types)
       ;(println 'vars: vars)
-      ;(println 'ast: ast)
+      ;(println 'run-type-check 'ast: ast)
       ;(if (null? cnt) (sys:clear-log-view))
       (let* ((fvars (map (lambda (t) ;; add any forced-type values to vars
                             (if (assoc (car t) forced-types)
@@ -1875,14 +2871,25 @@
                                    (cons (car t) (list tt)))
                                 t))
                          vars))
+	     ;(lll (println 'vars1: vars))
              (kts (map (lambda (x) (car x)) forced-types)) ;; just need symbols from forced-types
+	     ;(llll (println 'forced-types: forced-types))
+	     ;(lllll (println 'kts: kts))
+	     ;; fvars gets modified 'in place' during this next operation	     
              (ret (impc:ti:type-check ast fvars kts #f))
+	     ;(llllllll (println 'fvarsa: fvars))
+	     ;(llllllll (println 'kts: forced-types))
              (u (impc:ti:unify fvars))
+	     ;(lllll (println 'bbbbbb: u))
              (t (impc:ti:unity? u))
+	     ;(lllllll (println (println 'cccccc)))
              (tt (cl:every (lambda (x) x) t))
              (a (if tt #t
                     (impc:ti:find-unresolved-simple-types u))))
+	 ;(println 'fvars: fvars) 	
+	 ;(println 'types: u) 
          (if *impc:ti:print-unifications* (println 'tirun:> a '-> u))
+	 ;(println 'tt: tt 'a: a 'u: u)
          ;; if we have unified types then return them otherwise run through options!
          (if tt 
              u
@@ -1895,8 +2902,9 @@
                  ;; also attempting to unify that choice with all other
                  ;; unresolved simple types before each run
                  (let ((res (map (lambda (x)
+				    ;;(println 'xxx: x)
                                     ;; first clear vars
-                                    (impc:ti:clear-all-vars fvars)
+                                    (impc:ti:clear-all-vars fvars)				    
                                     (impc:ti:run-type-check fvars 
                                                             ;; as well as all simple types which have resolved fully
                                                             (append (cl:remove-if-not (lambda (z) (and (not (list? z))
@@ -1914,6 +2922,7 @@
                     (let ((r (cl:find-if (lambda (x) 
                                             (cl:every (lambda (x) x) (impc:ti:unity? x)))
                                          res)))
+		      ;(println 'res: res)
 		      ;; old version below as backup
                       (if (not r) 
                           (apply print-error 'Compiler 'Error: 'could 'not 'resolve 'types:
@@ -1935,6 +2944,158 @@
 ;; add types to source
 ;; also add clrun for closure application
 ;; and inject polymorphic functions
+;; (define impc:ti:add-types-to-source
+;;    (lambda (symname ast types envvars . prev)
+;;       ;(println 'symname: symname 'envvars: envvars 'ast: ast 'prev: prev)
+;;       (if (atom? ast) ast
+;;           (cond ((equal? (car ast) 'make-closure)
+;;                  (list (car ast)
+;; 		       (cadr ast)
+;;                        ;; global name
+;;                        (string-append (symbol->string symname) "__" (number->string (llvm:count++)))
+;;                        (if (null? prev) ;; this adds return type
+;;                            *impc:ir:other*
+;;                            (caddr (assoc (car prev) types))) 
+;;                        (map (lambda (v) ;; environment types
+;;                                (if (member v envvars)
+;;                                    (let ((p (assoc v types)))
+;;                                       (cons (string->symbol (string-append (symbol->string (car p)) "__sub"))
+;;                                             (cdr p)))
+;;                                    (assoc v types)))
+;;                             (cons symname (caddr ast)))
+;;                        (map (lambda (v) ;; argument types
+;;                                (assoc v types))
+;;                             (cadddr ast))
+;;                        (impc:ti:add-types-to-source symname (car (cddddr ast)) types (append envvars (caddr ast)))))
+;;                 ((equal? (car ast) 'clrun->)
+;;                  (list* (car ast)
+;;                         (cadr ast)
+;;                         (map (lambda (arg type)
+;;                                 ;(print 'clrunargs-> arg type)
+;;                                 (let ((a (impc:ti:add-types-to-source symname arg types envvars ast)))
+;;                                    (if (null? type) 
+;;                                        (print-error 'Compiler 'Error: 'cannot 'infer 'closure 'type 'for 
+;;                                                     (symbol->string (cadr ast)))
+;;                                        a)))
+;;                              (cddr ast)
+;;                              (cdddr (if (not (assoc (cadr ast) types)) ;; if not in local env then get types from global var
+;;                                         (cons (cadr ast) (impc:ir:get-type-from-str (llvm:get-global-variable-type (symbol->string (cadr ast)))))
+;;                                         (assoc (cadr ast) types))))))
+;; 		;; ;; inject ad-hoc polymorphism
+;; 		;; ((impc:ir:poly-types (car ast))
+;; 		;;  ;(println 'bingo: ast)
+;; 		;;  (let* ((vars (cl:tree-copy types))
+;; 		;; 	;(llll (println 'vars: vars))
+;; 		;; 	(kts (map (lambda (t) (car t)) types))
+;; 		;; 	;(lllll (println 'kts: kts))
+;; 		;; 	(polyargs (map (lambda (arg)
+;; 		;; 			 ;(println 'arg: arg)
+;; 		;; 			 (let ((res (impc:ti:type-check arg vars kts #f)))
+;; 		;; 			   ;(println 'res: res)
+;; 		;; 			   (if (and (list? res)
+;; 		;; 				    (> (length res) 1))
+;; 		;; 			       res
+;; 		;; 			       ;(print-error 'Compiler 'Error: 'unable 'to 'resolve 'polymorphic 'function: ast)
+;; 		;; 			       (if (atom? res) res (car res)))))
+;; 		;; 		       (cdr ast)))
+;; 		;; 	;(lllllll (println 'polyartgs: polyargs))
+;; 		;; 	(retargs (impc:ti:type-check ast vars kts #f))
+;; 		;;         ;(lllllllllll (println 'retargs: retargs 'prev: (cdr (car prev))))
+;; 		;; 	(rets (if (null? prev)
+;; 		;; 		  retargs
+;; 		;; 		  retargs))) ;(impc:ti:type-check (cdr (car prev)) vars kts retargs))))
+;; 		;;    ;;(println 'polyargs: polyargs 'retargs: retargs 'rets: rets 'prev: prev)
+;; 		;;    (let* ((polys (map (lambda (pret)
+;; 		;; 			(let* ((polyf (cons (+ *impc:ir:closure*
+;; 		;; 					       *impc:ir:pointer*
+;; 		;; 					       *impc:ir:pointer*)
+;; 		;; 					    (cons pret polyargs)))
+;; 		;; 			       (polyfunc (impc:ir:check-poly (car ast) polyf)))
+;; 		;; 			  ;(println 'polyf: polyf 'polyfunc: polyfunc)
+;; 		;; 			  polyfunc))
+;; 		;; 		      rets))
+;; 		;; 	  (validpolys (remove #f polys)))
+;; 		;;      ;(println 'all: polys 'polys: validpolys symname (cdr ast))
+;; 		;;      (let ((rr (impc:ti:add-types-to-source symname (cdr ast) types envvars)))
+;; 		;;        ;; take the first valid polymorphic dispatch
+;; 		;;        (cons (car validpolys) rr)))))
+
+;; 		;; inject (and potential compile) generic functions
+;; 		;; do generic functions before polys
+;; 		((and (symbol? (car ast))
+;; 		      (regex:match? (symbol->string (car ast)) "\\$\\$\\$")
+;; 		      (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")))))
+;; 		 ;; (println 'types types)		 
+;; 		 ;; (println 'gpoly: (car ast))
+;; 		 ;; (println 'gpoly: (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")))))
+;; 		 ;; (println 'gpt: (assoc (car ast) types))
+;; 		 ;;(println 'envvars: envvars)
+;; 		 ;;(println 'prev: prev)		 
+;; 		 (let* ((polyname (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$"))))
+;; 			(type (impc:ir:pretty-print-type (cdr (assoc (car ast) types))))
+;; 			(code (caddr (cadr (impc:ir:gpoly-types polyname))))
+;; 			;(lllll (println 'actual-code (caddr (cadr (impc:ir:gpoly-types polyname)))))
+;; 			(exists (impc:ir:check-poly polyname type)))
+;; 		   ;;(println 'symname: symname 'poly polyname 'of 'type: type 'exists: exists)
+;; 		   (if (or exists ;; check to see if a poly function already exists for type
+;; 			   (string=? (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")) ;; or recursive poly function
+;; 			   	     (car (regex:split (symbol->string symname) "--"))))
+;; 		       (if (string=? (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")) ;; or recursive poly function
+;; 			   	     (car (regex:split (symbol->string symname) "--")))
+;; 			   (begin ;(println 'resursivepoly)
+;; 				  (cons 'clrun-> (cons symname (impc:ti:add-types-to-source symname (cdr ast) types envvars ast))))
+;; 			   (begin ;(println 'polyexists)
+;; 				  (cons exists (impc:ti:add-types-to-source symname (cdr ast) types envvars ast))))
+;; 		       (let ((pfunc (string->symbol (string-append (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")) "--" (number->string (string-hash type))))))
+;; 			 ;;(println 'pfunc: pfunc type)
+;; 			 (set! code `(let ((,pfunc ,code)) ,pfunc))
+;; 		   	 (impc:ti:run pfunc code (cons pfunc (string->symbol type)))
+;; 			 (impc:ir:add-poly polyname pfunc type)			 
+;; 			 (let ((setter (llvm:get-function (string-append (symbol->string pfunc) "_setter"))))
+;; 			   (llvm:run setter (sys:create-mzone *impc:default-zone-size*)))
+;; 			 (cons pfunc (impc:ti:add-types-to-source symname (cdr ast) types envvars ast))))))
+		
+;; 		;; inject polymorphic functions		
+;; 		((and (symbol? (car ast))
+;; 		      (regex:match? (symbol->string (car ast)) "\\$\\$\\$"))
+;; 		 (println 'polyhit)
+;; 		 (let* ((pname (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$"))))
+;; 			(type (cdr (assoc (car ast) types)))
+;; 			(polyname (impc:ir:check-poly pname type)))
+;; 		   ;(println 'pname: pname 'type: type 'polyname: polyname)
+;; 		   (cons polyname (impc:ti:add-types-to-source symname (cdr ast) types envvars ast))))
+;; 		;; environments
+;;                 ((member (car ast) '(make-env make-env-zone))
+;;                  (list (car ast)
+;; 		       (cadr ast)
+;;                        (map (lambda (p)
+;;                                (list (assoc (car p) types)
+;;                                      (impc:ti:add-types-to-source symname (cadr p) types envvars (car p))))
+;;                             (caddr ast))
+;;                        (impc:ti:add-types-to-source symname (cadddr ast) types envvars)))
+;;                 ((or (and (assoc (car ast) types)
+;; 			  ;; (if (null? prev) #t
+;; 			  ;;     (not (member (car ast) (car prev))))
+;;                           (impc:ir:closure? (cdr (assoc (car ast) types))))
+;;                      (and (not (list? (car ast)))
+;; 			  (symbol? (car ast))
+;; 			  ;; (if (null? prev) #t
+;; 			  ;;     (not (member (car ast) (car prev))))
+;;                           (llvm:get-globalvar (symbol->string (car ast)))
+;;                           (impc:ir:closure? (llvm:get-global-variable-type (symbol->string (car ast))))))
+;; 		 ;(println 'bingo: ast envvars prev)
+;;                  (impc:ti:add-types-to-source symname (cons 'clrun-> ast) types envvars))   
+;;                 ((list? ast)
+;;                  (map (lambda (x)
+;;                          (impc:ti:add-types-to-source symname x types envvars ast))
+;;                       ast))
+;;                 (else (cons (apply impc:ti:add-types-to-source symname (car ast) types envvars)
+;;                             (apply impc:ti:add-types-to-source symname (cdr ast) types envvars)))))))
+
+
+;; add types to source
+;; also add clrun for closure application
+;; and inject polymorphic functions
 (define impc:ti:add-types-to-source
    (lambda (symname ast types envvars . prev)
       ;(println 'symname: symname 'envvars: envvars 'ast: ast 'prev: prev)
@@ -1944,9 +3105,10 @@
 		       (cadr ast)
                        ;; global name
                        (string-append (symbol->string symname) "__" (number->string (llvm:count++)))
-                       (if (null? prev) ;; this adds return type
+                       (if (or (null? prev) ;; this adds return type
+			       (null? (cdr (assoc (car prev) types))))
                            *impc:ir:other*
-                           (caddr (assoc (car prev) types))) 
+                           (caddr (assoc (car prev) types)))
                        (map (lambda (v) ;; environment types
                                (if (member v envvars)
                                    (let ((p (assoc v types)))
@@ -1972,52 +3134,63 @@
                              (cdddr (if (not (assoc (cadr ast) types)) ;; if not in local env then get types from global var
                                         (cons (cadr ast) (impc:ir:get-type-from-str (llvm:get-global-variable-type (symbol->string (cadr ast)))))
                                         (assoc (cadr ast) types))))))
-		;; ;; inject ad-hoc polymorphism
-		;; ((impc:ir:poly-types (car ast))
-		;;  ;(println 'bingo: ast)
-		;;  (let* ((vars (cl:tree-copy types))
-		;; 	;(llll (println 'vars: vars))
-		;; 	(kts (map (lambda (t) (car t)) types))
-		;; 	;(lllll (println 'kts: kts))
-		;; 	(polyargs (map (lambda (arg)
-		;; 			 ;(println 'arg: arg)
-		;; 			 (let ((res (impc:ti:type-check arg vars kts #f)))
-		;; 			   ;(println 'res: res)
-		;; 			   (if (and (list? res)
-		;; 				    (> (length res) 1))
-		;; 			       res
-		;; 			       ;(print-error 'Compiler 'Error: 'unable 'to 'resolve 'polymorphic 'function: ast)
-		;; 			       (if (atom? res) res (car res)))))
-		;; 		       (cdr ast)))
-		;; 	;(lllllll (println 'polyartgs: polyargs))
-		;; 	(retargs (impc:ti:type-check ast vars kts #f))
-		;;         ;(lllllllllll (println 'retargs: retargs 'prev: (cdr (car prev))))
-		;; 	(rets (if (null? prev)
-		;; 		  retargs
-		;; 		  retargs))) ;(impc:ti:type-check (cdr (car prev)) vars kts retargs))))
-		;;    ;;(println 'polyargs: polyargs 'retargs: retargs 'rets: rets 'prev: prev)
-		;;    (let* ((polys (map (lambda (pret)
-		;; 			(let* ((polyf (cons (+ *impc:ir:closure*
-		;; 					       *impc:ir:pointer*
-		;; 					       *impc:ir:pointer*)
-		;; 					    (cons pret polyargs)))
-		;; 			       (polyfunc (impc:ir:check-poly (car ast) polyf)))
-		;; 			  ;(println 'polyf: polyf 'polyfunc: polyfunc)
-		;; 			  polyfunc))
-		;; 		      rets))
-		;; 	  (validpolys (remove #f polys)))
-		;;      ;(println 'all: polys 'polys: validpolys symname (cdr ast))
-		;;      (let ((rr (impc:ti:add-types-to-source symname (cdr ast) types envvars)))
-		;;        ;; take the first valid polymorphic dispatch
-		;;        (cons (car validpolys) rr)))))
-		;; inject polymorphic functions
+
+		;; inject (and potential compile) generic functions
+		;; do generic functions before polys
 		((and (symbol? (car ast))
-		      (regex:match? (symbol->string (car ast)) "\\$\\$\\$"))
-		 (let* ((pname (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$"))))
+		      (regex:match? (symbol->string (car ast)) "##") ;"\\$\\$\\$")
+		      (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "##"))))) ;"\\$\\$\\$")))))
+		 ;; (println 'types types)		 
+		 ;; (println 'gpoly: (car ast))
+		 ;; (println 'gpoly: (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")))))
+		 ;; (println 'gpt: (assoc (car ast) types))
+		 ;;(println 'envvars: envvars)
+		 ;;(println 'prev: prev)		 
+		 (let* ((polyname (string->symbol (car (regex:split (symbol->string (car ast)) "##")))) ;"\\$\\$\\$"))))
+			(type (impc:ir:pretty-print-type (cdr (assoc (car ast) types))))
+			(code (caddr (cadr (impc:ir:gpoly-types polyname))))
+			;(lllll (println 'actual-code (caddr (cadr (impc:ir:gpoly-types polyname)))))
+			(exists (impc:ir:check-poly polyname type)))
+		   ;(println 'symname: symname 'poly polyname 'of 'type: type 'exists: exists)
+		   (if (or exists ;; check to see if a poly function already exists for type
+			   (string=? (car (regex:split (symbol->string (car ast)) "##")) ;"\\$\\$\\$")) ;; or recursive poly function
+			   	     (car (regex:split (symbol->string symname) "--"))))
+		       (if (string=? (car (regex:split (symbol->string (car ast)) "##")) ;"\\$\\$\\$")) ;; or recursive poly function
+			   	     (car (regex:split (symbol->string symname) "--")))
+			   (begin ;(println 'resursivepoly)
+				  (cons 'clrun-> (cons symname
+						       (map (lambda (jj)
+							      (impc:ti:add-types-to-source symname jj types envvars ast))
+							    (cdr ast)))))
+			   (begin ;(println 'polyexists)
+				  (cons exists
+					(map (lambda (jj)
+					       (impc:ti:add-types-to-source symname jj types envvars ast))
+					     (cdr ast)))))
+		       (let ((pfunc (string->symbol (string-append (car (regex:split (symbol->string (car ast)) "##")) "--" (number->string (string-hash type))))))
+		       ;(let ((pfunc (string->symbol (string-append (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")) "--" (number->string (string-hash type))))))
+			 ;(println 'pfunc: pfunc type)			 
+			 (set! code `(let ((,pfunc ,code)) ,pfunc))			 
+		   	 (impc:ti:run pfunc code (cons pfunc (string->symbol type)))
+			 (impc:ir:add-poly polyname pfunc type)			 
+			 (let ((setter (llvm:get-function (string-append (symbol->string pfunc) "_setter"))))
+			   (llvm:run setter (sys:create-mzone *impc:default-zone-size*)))
+			 (cons pfunc
+			       (map (lambda (jj)
+				      (impc:ti:add-types-to-source symname jj types envvars ast))
+				    (cdr ast)))))))		
+		;; inject polymorphic functions		
+		((and (symbol? (car ast))
+		      (regex:match? (symbol->string (car ast)) "##")) ;"\\$\\$\\$"))
+		 (let* ((pname (string->symbol (car (regex:split (symbol->string (car ast)) "##")))) ;"\\$\\$\\$"))))
 			(type (cdr (assoc (car ast) types)))
 			(polyname (impc:ir:check-poly pname type)))
 		   ;(println 'pname: pname 'type: type 'polyname: polyname)
-		   (cons polyname (impc:ti:add-types-to-source symname (cdr ast) types envvars))))
+		   (cons polyname
+			 (map (lambda (jj)
+				(impc:ti:add-types-to-source symname jj types envvars ast))
+			      (cdr ast)))))
+		;; environments
                 ((member (car ast) '(make-env make-env-zone))
                  (list (car ast)
 		       (cadr ast)
@@ -2027,11 +3200,16 @@
                             (caddr ast))
                        (impc:ti:add-types-to-source symname (cadddr ast) types envvars)))
                 ((or (and (assoc (car ast) types)
+			  ;; (if (null? prev) #t
+			  ;;     (not (member (car ast) (car prev))))
                           (impc:ir:closure? (cdr (assoc (car ast) types))))
                      (and (not (list? (car ast)))
 			  (symbol? (car ast))
+			  ;; (if (null? prev) #t
+			  ;;     (not (member (car ast) (car prev))))
                           (llvm:get-globalvar (symbol->string (car ast)))
                           (impc:ir:closure? (llvm:get-global-variable-type (symbol->string (car ast))))))
+		 ;;(println 'bingo: ast envvars prev)
                  (impc:ti:add-types-to-source symname (cons 'clrun-> ast) types envvars))   
                 ((list? ast)
                  (map (lambda (x)
@@ -2107,10 +3285,42 @@
 (define impc:ti:find-all-vars
    (lambda (full-ast syms)
      (letrec ((f (lambda (ast)
+		   ;(println 'ast: ast)
 		   (cond ((pair? ast)
-			  (cond ((and (symbol? (car ast))
-				      (regex:match? (symbol->string (car ast)) "\\$\\$\\$")
-				      (impc:ir:poly-types (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")))))
+			  (cond ((and (symbol? (car ast)) ;; this for generics
+				      (regex:match? (symbol->string (car ast)) "##") ;"\\$\\$\\$")
+				      (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "##"))))) ;"\\$\\$\\$")))))
+				      ;;(impc:ir:gpoly-types (car ast)))
+				 ;(println 'generics ast (regex:split (symbol->string (car ast)) "(\\$\\$\\$)|(--)"))
+				 ;; (let ((gname (string->symbol (car (regex:split (symbol->string (car ast)) "(\\$\\$\\$)|(--)"))))
+				 ;;       (gnum (string->number (cadr (regex:split (symbol->string (car ast)) "(\\$\\$\\$)|(--)")))))
+				 (let ((gname (string->symbol (car (regex:split (symbol->string (car ast)) "(##)|(--)"))))
+				       (gnum (string->number (cadr (regex:split (symbol->string (car ast)) "(##)|(--)")))))
+				   ;(println 'gname: gname)
+				   ;(println 'tt: (impc:ir:gpoly-types gname))
+				   ;(println 'type: (impc:ir:get-type-from-pretty-str (symbol->string (car (impc:ir:gpoly-types gname)))))
+				   (letrec ((t (impc:ir:get-type-from-pretty-str (symbol->string (car (impc:ir:gpoly-types gname)))))
+					    (ff (lambda (a)
+					          ;(println 'aaa: a)
+						  (cond ((null? a) 'done)
+							((atom? a)
+							 (if (and (symbol? a)
+								  (regex:match? (symbol->string a) "!"))
+							     (let* ((newgsym (string-append (symbol->string a) "##" (number->string gnum)))) ;"$$$" (number->string gnum))))
+							       (set! syms (append (list (string->symbol newgsym)) syms)))
+							     'done))
+							((list? a)
+							 (ff (car a))
+							 (ff (cdr a))
+							 'done)
+							(else 'done)))))
+				     (ff t)
+				     (set! syms (cl:remove-duplicates (append syms (list (car ast)))))
+				     (f (cdr ast)))))
+				((and (symbol? (car ast)) ;; this for polys
+				      (regex:match? (symbol->string (car ast)) "##") ;"\\$\\$\\$")
+				      (impc:ir:poly-types (string->symbol (car (regex:split (symbol->string (car ast)) "##"))))) ;"\\$\\$\\$")))))
+				 ;(println 'poly!var (car ast))
 				 (set! syms (append (list (car ast)) syms))
 				 (f (cdr ast)))
 				((equal? (car ast) 'make-closure)
@@ -2192,8 +3402,6 @@
 
 
 
-
-
 ;; expects t1 (i.e. original untransformed code)
 (define impc:ti:get-closure-arg-symbols
    (lambda (closure-sym ast)
@@ -2225,12 +3433,17 @@
                                     args))
                  (forced-types-updated (apply append (list) 
                                               (map (lambda (t)
-                                                      (if (impc:ir:closure? (cdr t))
-                                                          (append (map (lambda (sym type)
-                                                                          (cons sym type))
-                                                                       (impc:ti:get-closure-arg-symbols (car t) t1)
-                                                                       (cdddr t))
-                                                                  (list t))
+                                                      (if (and (impc:ir:closure? (cdr t))
+		 					       (not (null? (impc:ti:get-closure-arg-symbols (car t) t1))))
+		 					  (if (<> (length (cdddr t)) (length (impc:ti:get-closure-arg-symbols (car t) t1)))
+		 					      (begin
+		 						;(println '------ (cdddr t) (impc:ti:get-closure-arg-symbols (car t) t1))
+		 						(print-error 'Compiler 'Error: 'bad 'type (cdr t) 'for (car t)))
+		 					      (append (map (lambda (sym type)
+		 							     (cons sym type))
+		 							   (impc:ti:get-closure-arg-symbols (car t) t1)
+		 							   (cdddr t))
+		 						      (list t)))
                                                           (list t)))
                                                    forced-types)))
                  (checked-for-duplicates (let loop ((types forced-types-updated))
@@ -2279,11 +3492,13 @@
 ;; particular math coercions of forced types
 (define impc:ti:coercion-run
   (lambda (ast forced-types)
+    ;(println 'ast: ast)
     (if (pair? ast)
 	(cond ((member (car ast) '(< > * / = + - <>))
 	       (let ((a (assoc (cadr ast) forced-types))
 		     (b (assoc (caddr ast) forced-types)))
 		 (if (and (and a b)
+			  (not (impc:ir:vector? (cdr a)))
 			  (<> (cdr a) (cdr b)))
 		     (let ((ret (string->symbol (impc:ti:numeric-cast-operator (cdr a) (cdr b)))))
 		       (if (> (cdr a) (cdr b))
@@ -2314,9 +3529,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (define impc:ti:run
    (lambda (symname code . args)
-     ;(println 'impc:ti:run: symname)
-     ;(println 'code: code)
-     ;(println 'args: args)
+      ;(println '-----------> 'impc:ti:run: symname)
+      ;; (println 'code: code)
+      ;(println 'args: args)
       (set! *impc:ir:ls_var* '())
       ;; don't want type checking to find existing native versions!
       (if *impc:compile*
@@ -2325,8 +3540,10 @@
                  (llvm:erase-function (string-append (symbol->string symname) "_setter"))
                  (llvm:erase-function (string-append (symbol->string symname) "_maker"))))  
       (let* ((c code)
-	     ;(ct1 (now))
+	     ;(l (println 'c: code))
+	     ;(ct1 (now))	     
              (c1 (impc:ti:get-var-types c)) ;; this is a cons pair of (ast . types)
+	     ;(ll (println 'c1vt: c1))
 	     ;(ct2 (now))
              (t1 (impc:ti:first-transform (car c1) #t)) ;; car is ast
 	     ;(lllll (println 't1: t1))
@@ -2347,17 +3564,19 @@
 	     ;(ct8 (now))	     
 	     (t5 (impc:ti:coercion-run t3 forced-types)) ;; also there is doubling dipping here :(
 	     ;(ct9 (now))
-             (types (impc:ti:run-type-check vars forced-types t4))
-	     ;(lllllllllllllll (println 'types: types))
+             (typespre (impc:ti:run-type-check vars forced-types t4))
+	     ;(lllllll (println 'types-pre: typespre))
+	     (types (impc:ti:type-normalize typespre))
+	     ;(lllllllll (println 'types-normal: types))
 	     ;(ct10 (now))
              (newast (impc:ti:add-types-to-source symname t5 (cl:tree-copy types) (list)))
 	     ;(ct11 (now))
 	     )
-	 ;(println 'types: types)
-	 ;(println 'run: (impc:ti:unity? types))
-	 ;(println 'newast: newast)
-	 ;(println 'forced: forced-types)
-	 ;(println 'times: (- ct2 ct1) (- ct3 ct2) (- ct4 ct3) (- ct5 ct4) (- ct6 ct5) (- ct7 ct6) (- ct8 ct7) (- ct9 ct8) (- ct10 ct9) (- ct11 ct10))	 
+	 ;; (println 'types-post: types)
+	 ;; (println 'run: (impc:ti:unity? types))
+	 ;; (println 'newast: newast)
+	 ;; (println 'forced: forced-types)
+	 ;; (println 'times: (- ct2 ct1) (- ct3 ct2) (- ct4 ct3) (- ct5 ct4) (- ct6 ct5) (- ct7 ct6) (- ct8 ct7) (- ct9 ct8) (- ct10 ct9) (- ct11 ct10))	 
          ;; if we didn't unify print error and bomb out!
          (if (not (cl:every (lambda (x) x) (impc:ti:unity? types)))
 	     (begin ;(println 'types: types)
@@ -2732,11 +3951,8 @@
             (if *impc:compile*
                 (let ((ftype (llvm:get-function-args-withoutzone (symbol->string symname)))) 		  
                    (if (not *impc:compiler:print-raw-llvm*)
-		       (begin ;(println 'Successfully 'compiled symname '>>> 
-				   ;    (string->sexpr (impc:ir:pretty-print-type (cons (+ *impc:ir:closure* *impc:ir:pointer*)
-					;					       ftype))))
-			      (ascii-print-color 0 7 10)
-			      (print "Successfully compiled ")
+		       (begin (ascii-print-color 0 7 10)
+			      (print "Compiled ")
 			      (ascii-print-color 1 2 10)
 			      (print symname)
 			      (ascii-print-color 0 7 10)
@@ -2784,10 +4000,29 @@
 			  (ascii-print-color 0 7 10)))
 	       (begin (print-error 'no 'compiled 'function ',symname  '... 'turn 'on 'compilation?)
 		      (error ""))))))))
-
+	     
 ;; alias for definec (should replace definec)
 (define-macro (bind-func . args)
-  `(impc:ti:parametric-poly-pass '(definec ,@args)))
+  (if (regex:match? (symbol->string (car args)) ":")
+      (let ((res (regex:split (symbol->string (car args)) ":")))
+	(if (or (regex:match? (cadr res) "!")
+		(cl:find-if (lambda (v) (eq? v #t))
+			    (map (lambda (k)
+				   (if (assoc (string->symbol k) *impc:ir:gpolytypes*) #t #f))
+				 (regex:split (cadr res) "[,|*\\[\\]]"))))
+	    (begin (impc:ir:add-gpoly (cons 'bind-func args))
+		   `(begin (ascii-print-color 0 7 10)
+			   (print "Added generic ")
+			   (ascii-print-color 1 2 10)
+			   (print ,(car res))
+			   (ascii-print-color 0 7 10)
+			   (print " >>> ")
+			   (ascii-print-color 1 3 10)
+			   (print ,(cadr res))
+			   (ascii-print-color 0 7 10)
+			   (print)))
+	    `(impc:ti:parametric-poly-pass '(definec ,@args))))
+      `(impc:ti:parametric-poly-pass '(definec ,@args))))      
 
 (define-macro (bind-typevar name . args)
   (if (string? name) (set! name (string->symbol name)))
@@ -2857,7 +4092,7 @@
 (define-macro (bind-alias symbol type)
   `(begin (impc:ir:add-type-alias ,(symbol->string symbol) ,(symbol->string type))
           (ascii-print-color 0 7 10)
-	  (print "Successfull aliased ")
+	  (print "Aliased ")
 	  (ascii-print-color 1 2 10)
 	  (print ',symbol)
 	  (ascii-print-color 0 7 10)
@@ -2868,21 +4103,24 @@
 	  (ascii-print-color 0 7 10)
 	  (print)))
   
-
-(define-macro (bind-type symbol type)
-  `(begin (if (char=? (string-ref ,(symbol->string type) 0) #\<) ; (impc:ir:tuple? (impc:ir:get-type-from-pretty-str ,(symbol->string type)))
-	      (llvm:compile (string-append "%" ,(symbol->string symbol) " = type "
-					   ,(impc:ir:get-type-str (impc:ir:get-type-from-pretty-str (symbol->string type) (symbol->string symbol)))))
-	      (print-error 'Compiler 'Error: 'only 'named 'tuple 'types 'are 'supported))
+(define-macro (bind-type symbol type)  
+  `(begin (if (char=? (string-ref ,(symbol->string type) 0) #\<)
+	      (if (regex:match? ,(symbol->string type) "!") ;; then must be poly type
+		  (impc:ir:add-gpolytype ',symbol ',type)
+		  (llvm:compile (string-append "%" ,(symbol->string symbol) " = type "
+		  			       (impc:ir:get-type-str (impc:ir:get-type-from-pretty-str ,(symbol->string type) ,(symbol->string symbol))))))
+	      (print-error 'Compiler 'Error: 'type 'must 'be 'a 'tuple 'type))
 	  (ascii-print-color 0 7 10)
-	  (print "Successfull bound ")
+	  (print "Bound ")
 	  (ascii-print-color 1 2 10)
 	  (print ',symbol)
 	  (ascii-print-color 0 7 10)
 	  (print " >>> ")
 	  (ascii-print-color 1 3 10)
 	  ;(print ',type)
-	  (print (impc:ir:pretty-print-type (llvm:get-named-type ,(symbol->string symbol))))
+	  (if (impc:ir:gpolytype-types ',symbol)
+	      (print (impc:ir:gpolytype-types ',symbol))
+	      (print (impc:ir:pretty-print-type (llvm:get-named-type ,(symbol->string symbol)))))
 	  (ascii-print-color 0 7 10)
 	  (print)))
 
@@ -2893,7 +4131,7 @@
 					   ,(impc:ir:get-type-str (impc:ir:get-type-from-pretty-str (symbol->string type) (symbol->string symbol)))))
 	      (print-error 'Compiler 'Error: 'only 'named 'tuple 'types 'are 'supported))
 	  (ascii-print-color 0 7 10)
-	  (print "Successfull bound ")
+	  (print "Bound ")
 	  (ascii-print-color 1 2 10)
 	  (print ',symbol)
 	  (ascii-print-color 0 7 10)
@@ -2903,7 +4141,7 @@
 	  (print (impc:ir:pretty-print-type (llvm:get-named-type ,(symbol->string symbol))))
 	  (ascii-print-color 0 7 10)
 	  (print)))
-  
+
 
 
 ;;
@@ -2924,7 +4162,7 @@
                ;(ipc:call ,*impc:compiler:process* 'llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       (llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       (ascii-print-color 0 7 10)
-	       (print "Successfully bound ")
+	       (print "Bound ")
 	       (ascii-print-color 1 2 10)
 	       (print ',symbol)
 	       (ascii-print-color 0 7 10)
@@ -2974,7 +4212,7 @@
                ;(ipc:call ,*impc:compiler:process* 'llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       ;(llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       (ascii-print-color 0 7 10)
-	       (print "Successfully bound ")
+	       (print "Bound ")
 	       (ascii-print-color 1 2 10)
 	       (print ',symbol)
 	       (ascii-print-color 0 7 10)
@@ -3007,7 +4245,7 @@
 						      "]"))
 			 (print-error 'Compiler 'Error: ',symbol 'is 'already 'bound))
 		     (ascii-print-color 0 7 10)
-		     (print "Successfully bound ")
+		     (print "Bound ")
 		     (ascii-print-color 1 2 10)
 		     (print ',symbol)
 		     (ascii-print-color 0 7 10)
@@ -3019,6 +4257,99 @@
 	   (if (cptr? (eval value))
 	       `(bindc ,symbol ,type ,value)
 	       (print-error 'Compiler 'Error: 'bind-val 'only 'accepts 'numeric 'array 'and 'cptr 'values!)))))
+
+
+(define-macro (bind-val symbol type value)
+  (if (and (not (impc:ir:pointer? (impc:ir:convert-from-pretty-types type)))
+	   (or (impc:ir:number? (impc:ir:convert-from-pretty-types type)) ;(eval value))
+	       (impc:ir:boolean? (impc:ir:convert-from-pretty-types type)))) ;(eval value))
+       `(begin (if (not (llvm:get-globalvar ,(symbol->string symbol)))
+                   (llvm:compile (string-append "@" ,(symbol->string symbol)
+                                                " = global "
+                                                ,(impc:ir:get-type-str (impc:ir:convert-from-pretty-types type))
+						" "
+						(atom->string ,value))))
+               ;(ipc:call ,*impc:compiler:process* 'llvm:bind-global-var ,(symbol->string symbol) ,value)
+	       ;(llvm:bind-global-var ,(symbol->string symbol) ,value)
+	       (ascii-print-color 0 7 10)
+	       (print "Bound ")
+	       (ascii-print-color 1 2 10)
+	       (print ',symbol)
+	       (ascii-print-color 0 7 10)
+	       (print " >>> ")
+	       (ascii-print-color 1 3 10)
+	       (print ',type)
+	       (ascii-print-color 0 7 10)
+	       (print))
+       (cond ((and (impc:ir:array? (impc:ir:convert-from-pretty-types type))
+		   (not (impc:ir:pointer? (impc:ir:convert-from-pretty-types type))))
+	      (let* ((array-type (impc:ir:convert-from-pretty-types type))
+		     (sub-type (caddr array-type))
+		     (num (cadr array-type))
+		     (atypestr (impc:ir:get-type-str array-type))
+		     (subtypestr (impc:ir:get-type-str sub-type)))
+		`(begin (if (not (llvm:get-globalvar ,(symbol->string symbol)))
+			    (llvm:compile (string-append "@" ,(symbol->string symbol)
+							 " = global "
+							 ,atypestr
+							 " [" ,subtypestr " " ,(if (list? value)
+										   (atom->string (cadr value))
+										   (atom->string (eval value)))
+							 ,(apply string-append (map (lambda (v)
+										      (string-append ", " subtypestr
+												     " " (atom->string v)))
+										    (if (list? value)
+											(cddr value)
+											(make-list-with-proc (- num 1)
+													     (lambda (i) (eval value))))))
+							 "]"))
+			    (print-error 'Compiler 'Error: ',symbol 'is 'already 'bound))
+			(ascii-print-color 0 7 10)
+			(print "Bound ")
+			(ascii-print-color 1 2 10)
+			(print ',symbol)
+			(ascii-print-color 0 7 10)
+			(print " >>> ")
+			(ascii-print-color 1 3 10)
+			(print ',type)
+			(ascii-print-color 0 7 10)
+			(print))))
+	     ((and (impc:ir:vector? (impc:ir:convert-from-pretty-types type))
+		   (not (impc:ir:pointer? (impc:ir:convert-from-pretty-types type))))
+	      (let* ((array-type (impc:ir:convert-from-pretty-types type))
+		     (sub-type (caddr array-type))
+		     (num (cadr array-type))
+		     (atypestr (impc:ir:get-type-str array-type))
+		     (subtypestr (impc:ir:get-type-str sub-type)))
+		`(begin (if (not (llvm:get-globalvar ,(symbol->string symbol)))
+			    (llvm:compile (string-append "@" ,(symbol->string symbol)
+							 " = global "
+							 ,atypestr
+							 " <" ,subtypestr " " ,(if (list? value)
+										   (atom->string (cadr value))
+										   (atom->string (eval value)))
+							 ,(apply string-append (map (lambda (v)
+										      (string-append ", " subtypestr
+												     " " (atom->string (eval v))))
+										    (if (list? value)
+											(cddr value)
+											(make-list-with-proc (- num 1)
+													     (lambda (i) (eval value))))))
+							 ">"))
+			    (print-error 'Compiler 'Error: ',symbol 'is 'already 'bound))
+			(ascii-print-color 0 7 10)
+			(print "Bound ")
+			(ascii-print-color 1 2 10)
+			(print ',symbol)
+			(ascii-print-color 0 7 10)
+			(print " >>> ")
+			(ascii-print-color 1 3 10)
+			(print ',type)
+			(ascii-print-color 0 7 10)
+			(print))))	    	     
+	     ((cptr? (eval value))
+	      `(bindc ,symbol ,type ,value))
+	     (else (print-error 'Compiler 'Error: 'bind-val 'only 'accepts 'numeric 'array 'and 'cptr 'values!)))))
 
 
 (define impc:ir:get-function-type
@@ -3035,7 +4366,7 @@
     ;(set! type (impc:ir:get-type-from-pretty-str (symbol->string type)))
     `(begin (impc:ir:add-poly ',poly_sym ',implementation_sym ',type)
 	    (ascii-print-color 0 7 10)
-	    (print "Successfully poly'd ")
+	    (print "Poly'd ")
 	    (ascii-print-color 1 2 10)
 	    (print ',poly_sym)
 	    (ascii-print-color 0 7 10)
@@ -3056,7 +4387,7 @@
                ;(ipc:call ,*impc:compiler:process* 'llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       (llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       (ascii-print-color 0 7 10)
-	       (print "Successfully bound ")
+	       (print "Bound ")
 	       (ascii-print-color 1 2 10)
 	       (print ',symbol)
 	       (ascii-print-color 0 7 10)
@@ -3094,7 +4425,7 @@
       (if (and (llvm:compile ircode)
 	       (llvm:bind-symbol library (symbol->string symname)))
 	  (begin (ascii-print-color 0 9 10)
-		 (print "Successfully bound ")
+		 (print "Bound ")
 		 (ascii-print-color 1 2 10)
 		 (print (symbol->string symname))
 		 (ascii-print-color 0 9 10)

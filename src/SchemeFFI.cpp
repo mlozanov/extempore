@@ -210,6 +210,7 @@ namespace extemp {
 	    // sys stuff
 	    { "sys:pointer-size",		&SchemeFFI::pointerSize },
 	    { "sys:platform",		&SchemeFFI::platform },
+	    { "sys:cmdarg",		&SchemeFFI::cmdarg },
 	    { "sys:open-dylib",		&SchemeFFI::openDynamicLib },
 	    { "sys:close-dylib",		&SchemeFFI::closeDynamicLib },
 	    { "sys:make-cptr",		&SchemeFFI::makeCptr },
@@ -768,6 +769,13 @@ namespace extemp {
 #else
 	return mk_integer(_sc, 32);
 #endif
+    }
+
+    pointer SchemeFFI::cmdarg(scheme* _sc, pointer args)
+    {
+      char* key = string_value(pair_car(args));
+      std::string val = UNIV::CMDPARAMS[std::string(key)];
+      return mk_string(_sc,val.c_str());
     }
 
     pointer SchemeFFI::platform(scheme* _sc, pointer args)
@@ -2339,7 +2347,17 @@ namespace extemp {
 
     pointer SchemeFFI::get_named_type(scheme* _sc, pointer args)
     {
-	char* name = string_value(pair_car(args));
+	char* n = string_value(pair_car(args));
+	char nk[256];
+	char* name = nk;
+	strcpy(name,n);
+	if (name[0] == '%') name = name++;	
+
+	int ptrdepth = 0;
+	while(name[strlen(name)-1] == '*') {
+	  name[strlen(name)-1]=NULL;
+          ptrdepth++;
+	}
 
 	llvm::Module* M = EXTLLVM::I()->M;
 	
@@ -2357,9 +2375,20 @@ namespace extemp {
 	    rsplit("= type ",(char*)tmp_name,tmp_str_a,tmp_str_b);
 	    tmp_name = tmp_str_b;
 	  }
+	  
+	  //add back any requried '*'s
+	  if(ptrdepth>0) {
+	    char tmpstr[256];
+	    memset(tmpstr,0,256);
+            strcpy(tmpstr,tmp_name);
+	    for( ;ptrdepth>0;ptrdepth--) {
+	      tmpstr[strlen(tmpstr)]='*';
+	    }
+	    tmp_name = tmpstr;
+	  }
 	  return mk_string(_sc,tmp_name);
 	} else {
-	  return _sc->NIL;
+	  return _sc->NIL; 
 	}
     }
 	

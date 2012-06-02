@@ -125,6 +125,13 @@ double getRealTime()
 #endif //TARGET_OS_LINUX
 #endif //EXT_BOOST
 
+#ifdef TARGET_OS_MAC
+double getRealTime()
+{
+   return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970; 
+}
+#endif
+
 #ifdef TARGET_OS_WINDOWS
 #define isnan(x) ((x) != (x))
 #define isinf(x) (isnan(x-x))
@@ -262,6 +269,7 @@ namespace extemp {
       UNIV::CHANNELS = 2;
       UNIV::SAMPLERATE = 44100;
       UNIV::FRAMES = 1024;
+
 
       /* This holds the error code returned */
       int err;
@@ -553,7 +561,7 @@ namespace extemp {
 	started = false;
     }
 
-#elif defined (TARGET_OS_MAC)
+#elif defined (COREAUDIO) //(TARGET_OS_MAC)
 
 
     //-----------------------------------
@@ -650,6 +658,7 @@ namespace extemp {
 
     AudioDevice::AudioDevice() : started(false), buffer(0), dsp_closure(0), dsp_wrapper(0), dsp_wrapper_array(0)
     {
+
         // // get the default output device
         // UInt32 count = (UInt32) sizeof(device);
         // OSStatus err = AudioHardwareGetProperty(kAudioHardwarePropertyDefaultOutputDevice,&count,(void*)&device);
@@ -820,7 +829,7 @@ namespace extemp {
 #else
     //-----------------------------------
     //  PORT AUDIO
-    //-----------------------------------
+    //-----------------------------------  
     int audioCallback(const void* inputBuffer, void* outputBuffer, unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo *timeInfo, PaStreamCallbackFlags statusFlags, void *userData)
     {        
         TaskScheduler* sched = static_cast<TaskScheduler*>(userData);
@@ -856,10 +865,24 @@ namespace extemp {
 		uint32_t ii = i*UNIV::CHANNELS;
 		SAMPLE* dat = (SAMPLE*) outputBuffer;
 		SAMPLE* in = (SAMPLE*) inputBuffer;
-		for(uint32_t k=0; k<UNIV::CHANNELS; k++)
-		{
-		  dat[ii+k] = audio_sanity((SAMPLE)cache_wrapper(zone, (void*)closure, /*(double)in[ii+k]*/0.0,(double)(i+UNIV::DEVICE_TIME),(double)k,data));
-		  llvm_zone_reset(zone);
+		if(UNIV::IN_CHANNELS==UNIV::CHANNELS) {
+		  for(uint32_t k=0; k<UNIV::CHANNELS; k++)
+		    {		  
+		      dat[ii+k] = audio_sanity((SAMPLE)cache_wrapper(zone, (void*)closure, (double)in[ii+k], (double)(i+UNIV::DEVICE_TIME),(double)k,data));
+		      llvm_zone_reset(zone);
+		    }
+		}else if(UNIV::IN_CHANNELS==1){
+		  for(uint32_t k=0; k<UNIV::CHANNELS; k++)
+		    {		  
+		      dat[ii+k] = audio_sanity((SAMPLE)cache_wrapper(zone, (void*)closure, (double)in[ii],(double)(i+UNIV::DEVICE_TIME),(double)k,data));
+		      llvm_zone_reset(zone);
+		    }		  
+		}else{
+		  for(uint32_t k=0; k<UNIV::CHANNELS; k++)
+		    {		  
+		      dat[ii+k] = audio_sanity((SAMPLE)cache_wrapper(zone, (void*)closure, /*(double)in[ii+k]*/0.0,(double)(i+UNIV::DEVICE_TIME),(double)k,data));
+		      llvm_zone_reset(zone);
+		    }
 		}
 	    }
 	    //llvm_pop_zone_stack();
@@ -867,13 +890,25 @@ namespace extemp {
 	}else if(AudioDevice::I()->getDSPWrapperArray()) { // if true then we must be buffer by buffer
 	    dsp_f_ptr_array dsp_wrapper = AudioDevice::I()->getDSPWrapperArray();
 	    dsp_f_ptr_array cache_wrapper = dsp_wrapper;
-	    //llvm_zone_t* zone = llvm_zone_create(1024*50);
+	    void (*closure) (float*,float*,float,float,void*) = * ((void(**)(float*,float*,float,float,void*)) cache_closure);
 	    llvm_zone_t* zone = llvm_peek_zone_stack();
-	    //llvm_push_zone_stack(zone);
-	    cache_wrapper(zone, cache_closure, (SAMPLE*)inputBuffer,(SAMPLE*)outputBuffer,UNIV::FRAMES,UNIV::DEVICE_TIME,UNIV::CHANNELS);
+	    SAMPLE* indat = (SAMPLE*) inputBuffer;
+	    SAMPLE* outdat = (SAMPLE*) outputBuffer;	    
+	    static SAMPLE bufin[32]; 
+	    static SAMPLE bufout[32];
+	    int soffset = 0; // sample chunk offset
+	    for(int i=0;i<UNIV::FRAMES/32;i++) { // how many chunks of 32 do we process?
+	      soffset = i*32*UNIV::CHANNELS;
+	      for(int j=0;j<UNIV::CHANNELS;j++) {
+		// turn interleaved into non-interleaved
+		if(inputBuffer) for(int k=0;k<32;k++) bufin[k] = indat[soffset+j+(k*UNIV::CHANNELS)];
+		cache_wrapper(zone, (void*)closure, bufin, bufout, (SAMPLE)(UNIV::DEVICE_TIME+(i*32)),(SAMPLE)j,userData);
+		// turn non-interleaved back into interleaved
+		for(int k=0;k<32;k++) outdat[(soffset+j+(k*UNIV::CHANNELS))] = bufout[k];
+	      }
+	    }
+	    //printf("soffset: %d\n",soffset);
 	    llvm_zone_reset(zone);
-	    //llvm_pop_zone_stack();
-	    //llvm_zone_destroy(zone);
 	}else{ 
 	    //zero out audiobuffer
 	    memset(outputBuffer,0,(UNIV::CHANNELS*UNIV::FRAMES*sizeof(SAMPLE)));
@@ -939,7 +974,7 @@ namespace extemp {
 	  }
           pain.channelCount=UNIV::IN_CHANNELS;
           pain.hostApiSpecificStreamInfo=NULL;
-          pain.sampleFormat=paFloat32;
+          pain.sampleFormat=paFloat32; //|((UNIV::INTERLEAVED==0) ? 0 : paNonInterleaved);
           pain.suggestedLatency = deviceInfo->defaultLowInputLatency;
           pain.hostApiSpecificStreamInfo = NULL;
           PaStreamParameters* painptr = &pain;
@@ -949,7 +984,7 @@ namespace extemp {
 	  outputDevice = UNIV::AUDIO_DEVICE;
           paout.channelCount=UNIV::CHANNELS;
           paout.device=UNIV::AUDIO_DEVICE;
-          paout.sampleFormat=paFloat32;
+          paout.sampleFormat=paFloat32; //|((UNIV::INTERLEAVED==0) ? 0 : paNonInterleaved);
           paout.suggestedLatency = deviceInfo->defaultLowOutputLatency;
           paout.hostApiSpecificStreamInfo = NULL;
           PaStreamParameters* paoutptr = &paout;
@@ -959,8 +994,8 @@ namespace extemp {
 	}else{
           err = Pa_OpenDefaultStream(&stream, 0, UNIV::CHANNELS, paFloat32, UNIV::SAMPLERATE, UNIV::FRAMES, audioCallback, (void*)TaskScheduler::I());
 	}
-        //std::cout << "Input Device: " << inputDevice << std::endl;
-        //std::cout << "Output Device: " << outputDevice << std::endl;
+        // std::cout << "Input Device: " << inputDevice << std::endl;
+        // std::cout << "Output Device: " << outputDevice << std::endl;
 
 	if(err != paNoError) {
    	    ascii_text_color(1,1,10);            
@@ -996,17 +1031,25 @@ namespace extemp {
 	ascii_text_color(1,7,10);
 	std::cout << "---PortAudio---" << std::endl;
 	ascii_text_color(0,7,10);
-        std::cout << "Audio Device\t: " << std::flush;
+        std::cout << "Output Device\t: " << std::flush;
 	ascii_text_color(1,6,10);	
 	std::cout << (Pa_GetDeviceInfo( outputDevice ))->name << std::endl;	
+	ascii_text_color(0,7,10);
+        std::cout << "Input Device\t: " << std::flush;
+	ascii_text_color(1,6,10);	
+	std::cout << (Pa_GetDeviceInfo( inputDevice ))->name << std::endl;	
 	ascii_text_color(0,7,10);
         std::cout << "SampleRate\t: " << std::flush;
 	ascii_text_color(1,6,10);	
 	std::cout << UNIV::SAMPLERATE << std::endl << std::flush;
 	ascii_text_color(0,7,10);	
-        std::cout << "Channels\t: " << std::flush;
+        std::cout << "Channels Out\t: " << std::flush;
 	ascii_text_color(1,6,10);	
 	std::cout << UNIV::CHANNELS << std::endl << std::flush;
+	ascii_text_color(0,7,10);	
+        std::cout << "Channels In\t: " << std::flush;
+	ascii_text_color(1,6,10);	
+	std::cout << UNIV::IN_CHANNELS << std::endl << std::flush;
 	ascii_text_color(0,7,10);	
         std::cout << "Frames\t\t: " << std::flush;
 	ascii_text_color(1,6,10);	
@@ -1015,7 +1058,11 @@ namespace extemp {
         std::cout << "Latency\t\t: " << std::flush;
 	ascii_text_color(1,6,10);	
 	std::cout << info->outputLatency << std::endl << std::flush;
-	ascii_text_color(0,7,10);	
+	// ascii_text_color(0,7,10); 
+        // std::cout << "Interleaved\t: " << std::flush;
+	// ascii_text_color(1,6,10);	
+	// std::cout << ((UNIV::INTERLEAVED==0) ? "TRUE" : "FALSE") << std::endl << std::flush;
+	// ascii_text_color(0,7,10);	
 	std::cout << std::endl << std::flush;
 	//ascii_text_color(0,7,10);
 

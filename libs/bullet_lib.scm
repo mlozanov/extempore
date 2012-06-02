@@ -3,8 +3,8 @@
 ;; Bullet Physics Library Bindings
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;(define bulletlib (sys:open-dylib "libBulletDynamics.so.2.79"))
-(define bulletlib (sys:open-dylib "BulletDynamics.dll"))
+(define bulletlib (sys:open-dylib "libBulletDynamics.dylib"))
+;(define bulletlib (sys:open-dylib "BulletDynamics.dll"))
 ;(define bulletlib (sys:open-dylib "BulletMultiThreaded.dll"))
 
 (bind-type _plPhysicsSdkHandle <i32>)
@@ -34,7 +34,7 @@
 
 (bind-lib bulletlib plCreateDynamicsWorld [plDynamicsWorldHandle,plPhysicsSdkHandle]*)
 (bind-lib bulletlib plDeleteDynamicsWorld [void,plDynamicsWorldHandle]*)
-(bind-lib bulletlib plSetGravity [void,plDynamicsWorldHandle,plReal*]*)
+;(bind-lib bulletlib plSetGravity [void,plDynamicsWorldHandle,plReal*]*)
 (bind-lib bulletlib plStepSimulation [void,plDynamicsWorldHandle,plReal,i32,plReal]*)
 
 (bind-lib bulletlib plCreateRigidBody [plRigidBodyHandle,i8*,float,plCollisionShapeHandle]*)
