@@ -58,24 +58,25 @@
 
 (definec h3d_init
   (let ((hand -1)
-		(matRes -1)
-		(envRes -1)
-		(knightRes -1)
-		(knightAnim1Res -1)
-		(knightAnim2Res -1)
-		(particleSysRes -1)
-		)
+	(matRes -1)
+	(envRes -1)
+	(knightRes -1)
+	(knightAnim1Res -1)
+	(knightAnim2Res -1)
+	(particleSysRes -1)
+	)
     (lambda ()
       (if (h3dInit)
-		  (printf "Successfully Inited Horde3D\n")
-		  (begin (h3dutDumpMessages)
-				 (printf "Failed to init Horde3D\n")))
+	  (printf "Successfully Inited Horde3D\n")
+	  (begin (h3dutDumpMessages)
+		 (printf "Failed to init Horde3D\n")))
+      
       ;; set options
-										;      (h3dSetOption H3DOptions_LoadTextures 1)
-										;      (h3dSetOption H3DOptions_TexCompression 0)
-										;      (h3dSetOption H3DOptions_FastAnimation 0)
-										;      (h3dSetOption H3DOptions_MaxAnisotropy 4)
-										;      (h3dSetOption H3DOptions_ShadowMapSize 2048)
+      (h3dSetOption H3DOptions_LoadTextures 1.0)
+      (h3dSetOption H3DOptions_TexCompression 0.0)
+      (h3dSetOption H3DOptions_FastAnimation 0.0)
+      (h3dSetOption H3DOptions_MaxAnisotropy 4.0)
+      (h3dSetOption H3DOptions_ShadowMapSize 2048.0)
 
       ;; add resources
 
@@ -91,8 +92,8 @@
 
       ;; load resources
       (if (h3dutLoadResourcesFromDisk "Horde3D")
-		  (printf "succesfully loaded resouces\n")
-		  (printf "failed to load resources\n"))
+      	  (printf "succesfully loaded resouces\n")
+      	  (printf "failed to load resources\n"))
 
       ;; log any errors to Horde3D_Log.html
       (h3dutDumpMessages)                  
@@ -102,14 +103,14 @@
       ;; add environment
       (set! env (h3dAddNodes H3DRootNode envRes))
       (h3dSetNodeTransform env 0.0 -20.0 0.0
-						   0.0  0.0  0.0
-						   20.0 20.0 20.0)
+      			       0.0  0.0  0.0
+      			       20.0 20.0 20.0)
       
       ;; add knight
       (set! _knight (h3dAddNodes H3DRootNode knightRes))
       (h3dSetNodeTransform _knight 0.0 0.0   0.0
       			           0.0 180.0 0.0
-						   0.1 0.1   0.1)
+      				   0.1 0.1   0.1)
       (h3dSetupModelAnimStage _knight 0 knightAnim1Res 0 "" #f)
       (h3dSetupModelAnimStage _knight 1 knightAnim2Res 0 "" #f)
       ;; attach particle system to hand joint
@@ -117,16 +118,16 @@
       (set! hand (h3dGetNodeFindResult 0))
       (set! _particleSys (h3dAddNodes hand particleSysRes))
       (h3dSetNodeTransform _particleSys 0.0  40.0 0.0
-						   90.0 0.0  0.0
-						   1.0  1.0  1.0)
+      			                90.0 0.0  0.0
+      					1.0  1.0  1.0)
       ;; attached 2nd particle system to root node
       (set! _particleSys2 (h3dAddNodes H3DRootNode particleSysRes))
       
       ;; add light source
       (set! light (h3dAddLightNode H3DRootNode "Light1" 0 "LIGHTING" "SHADOWMAP"))
       (h3dSetNodeTransform light 0.0   15.0 10.0
-						   -60.0 0.0  0.0
-						   1.0   1.0  1.0)
+      			         -60.0 0.0  0.0
+      				 1.0   1.0  1.0)
       (h3dSetNodeParamF light H3DLight_RadiusF 0 30.0)
       (h3dSetNodeParamF light H3DLight_FovF 0 90.0)
       (h3dSetNodeParamI light H3DLight_ShadowMapCountI 1)
@@ -153,28 +154,28 @@
       (h3dSetModelAnimParams _knight 0 (* (dtof (* 0.5 _at)) 24.0) 24.0) ;_weight)     
       
       (let ((cnt (h3dFindNodes _particleSys "" H3DNodeTypes_Emitter))
-			(i 0))
+	    (i 0))
       	(dotimes (i cnt)
       	  (h3dAdvanceEmitterTime (h3dGetNodeFindResult i) (/ 1.0 _curFPS))))
       (h3dSetNodeTransform _particleSys2 (* 12.0 (dtof (sin _at))) 2.0 (* 12.0 (dtof (cos _at))) 0.0 0.0 0.0 1.0 1.0 1.0)
       (let ((cnt3 (h3dFindNodes _particleSys2 "" H3DNodeTypes_Emitter))
-			(i3 0))
+	    (i3 0))
       	(dotimes (i3 cnt3)
       	  (h3dAdvanceEmitterTime (h3dGetNodeFindResult i3) (/ 1.0 _curFPS))))
 
-      (h3dSetNodeTransform light 4.0 9.0 4.0
-						   -60.0 0.0  0.0
-						   1.0  1.0  1.0)
+      (h3dSetNodeTransform light 4.0 9.0 3.0
+			         -60.0 0.0  0.0
+				 1.0  1.0  1.0)
 
       (h3dSetNodeTransform _cam
-						   (+ (* 50.0 (dtof (cos (* 0.25 _at)))) 0.0)
-						   5.0
-						   (+ (* 50.0 (dtof (sin (* 0.25 _at)))) 0.0)
-						   0.0
-						   (dtof (* 57.295791 (atan2 (cos (* 0.25 _at))
-													 (sin (* 0.25 _at)))))
-						   0.0
-						   1.0 1.0 1.0)
+			   (+ (* 25.0 (dtof (cos (* 0.25 _at)))) 0.0)
+			   5.0
+			   (+ (* 25.0 (dtof (sin (* 0.25 _at)))) 0.0)
+			   0.0
+			   (dtof (* 57.295791 (atan2 (cos (* 0.25 _at))
+						     (sin (* 0.25 _at)))))
+			   0.0
+			   1.0 1.0 1.0)
       (h3dRender _cam)
       (h3dFinalizeFrame)
       (h3dClearOverlays)
@@ -196,7 +197,7 @@
   (lambda ()
     (println 'starting)
     (eval '(define pr2 (gl:make-ctx ":0.0" #f 0.0 0.0 900.0 600.0))
-		  (interaction-environment))
+	  (interaction-environment))
     (h3d_init)
     (resize 900.0 600.0)
     (opengl-test (*metro* 'get-beat 4) 1/12)))
