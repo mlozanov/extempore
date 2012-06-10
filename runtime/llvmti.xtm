@@ -33,7 +33,8 @@
 ;; 
 ;; 
 
-
+(define *impc:docstrings* '())
+(define *impc:closuretypes* '())
 
 (define *impc:ti:print-sub-checks* #f)
 (define *impc:ti:print-main-check* #f)
@@ -375,25 +376,34 @@
                     (apply list 'begin (cdar ast)))
                 (impc:ti:cond (cdr ast))))))
 
-(define impc:ti:map   
-   (lambda (ast)
-      (list 'let 'maplloop (append (map (lambda (p l)
-                                       (cons l (list p)))
-                                    (cdr ast)
-                                    (list 'l1 'l2 'l3 'l4 'l5 'l6 'l7 'l8 'l9))
-                               (list (list 'll '(list))))
-            (list 'if '(null? l1) '(reverse ll)
-                  (append '(maplloop)
-                        (map (lambda (p l)
-                                (list 'cdr l))
-                             (cdr ast)
-                             (list 'l1 'l2 'l3 'l4 'l5 'l6 'l7 'l8 'l9))
-                        (list (list 'cons (append (list (car ast))
-                                                  (map (lambda (p l)
-                                                          (list 'car l))
-                                                       (cdr ast)
-                                                       (list 'l1 'l2 'l3 'l4 'l5 'l6 'l7 'l8 'l9)))
-                                    'll)))))))
+(define impc:ti:list
+  (lambda (ast)
+    (if (null? ast) 'null
+	(list 'cons
+	      (car ast)
+	      (impc:ti:list (cdr ast))))))
+
+		
+
+;; (define impc:ti:map   
+;;    (lambda (ast)
+;;       (list 'let 'maplloop (append (map (lambda (p l)
+;;                                        (cons l (list p)))
+;;                                     (cdr ast)
+;;                                     (list 'l1 'l2 'l3 'l4 'l5 'l6 'l7 'l8 'l9))
+;;                                (list (list 'll '(list))))
+;;             (list 'if '(null? l1) '(reverse ll)
+;;                   (append '(maplloop)
+;;                         (map (lambda (p l)
+;;                                 (list 'cdr l))
+;;                              (cdr ast)
+;;                              (list 'l1 'l2 'l3 'l4 'l5 'l6 'l7 'l8 'l9))
+;;                         (list (list 'cons (append (list (car ast))
+;;                                                   (map (lambda (p l)
+;;                                                           (list 'car l))
+;;                                                        (cdr ast)
+;;                                                        (list 'l1 'l2 'l3 'l4 'l5 'l6 'l7 'l8 'l9)))
+;;                                     'll)))))))
 
 (define impc:ti:not
    (lambda (ast)
@@ -551,8 +561,10 @@
                         (impc:ti:first-transform (impc:ti:random (cdr ast)) inbody?))
                        ((eq? (car ast) 'quote)
                         (impc:ti:first-transform (impc:ti:quote (cadr ast)) inbody?))
-                       ((member (car ast) '(map for-each))
-                        (impc:ti:first-transform (impc:ti:map (cdr ast)) inbody?))
+                       ((eq? (car ast) 'list)
+                        (impc:ti:first-transform (impc:ti:list (cdr ast)) inbody?))
+                       ;; ((member (car ast) '(map for-each))
+                       ;;  (impc:ti:first-transform (impc:ti:map (cdr ast)) inbody?))
                        ((eq? (car ast) 'case) 
                         (impc:ti:first-transform (impc:ti:case (cadr ast) (cddr ast)) inbody?))
 		       ((eq? (car ast) 'afill!)
@@ -581,7 +593,7 @@
 		       ((and (member (car ast) '(* - / + % bitwise-and bitwise-or bitwise-eor bitwise-shift-left bitwise-shift-right))
                              (<> (length ast) 3))
                         (impc:ti:first-transform (impc:ti:binary-arity ast inbody?) inbody?))
-		       ((eq? (car ast) 'bitwise-not)
+		       ((member (car ast) '(bitwise-not ~))
 			(impc:ti:bitwise-not-to-eor ast inbody?))
                        ((eq? (car ast) 'lambda)
                         (if inbody?
@@ -643,17 +655,22 @@
                 (else (cond ((eq? ast #f) '(impc_false))
                             ((eq? ast #t) '(impc_true))
 			    ((eq? ast 'cast) 'bitcast)
+			    ((eq? ast '&) 'bitwise-and)
+			    ((eq? ast 'bor) 'bitwise-or) ; can't use a pipe
+			    ((eq? ast '^) 'bitwise-eor)
+			    ((eq? ast '<<) 'bitwise-shift-left)
+			    ((eq? ast '>>) 'bitwise-shift-right)
+			    ((eq? ast '~) 'bitwise-not)
                             ((eq? ast 'else) '(impc_true))
-                            ((eq? ast '*samplerate*) '(llvm_samplerate))
                             ((eq? ast 'printf) 'llvm_printf)
-                            ((eq? ast 'sprintf) 'llvm_sprintf)			    
+			    ((eq? ast 'sprintf) 'llvm_sprintf)
 			    ((eq? ast 'null) '(impc_null))
 			    ((eq? ast 'now) 'llvm_now)
 			    ((eq? ast 'pset!) 'pointer-set!)
 			    ((eq? ast 'pref) 'pointer-ref)
 			    ((eq? ast 'pref-ptr) 'pointer-ref-ptr)
 			    ((eq? ast 'vset!) 'vector-set!)
-			    ((eq? ast 'vref) 'vector-ref)			    
+			    ((eq? ast 'vref) 'vector-ref)
 			    ((eq? ast 'aset!) 'array-set!)
 			    ((eq? ast 'aref) 'array-ref)
 			    ((eq? ast 'aref-ptr) 'array-ref-ptr)
@@ -1684,6 +1701,20 @@
 			   ;;(println 'avars: (assoc a vars))
 	 		   ;; gt for generics type
 	 		   (let ((tt (impc:ti:type-check a vars kts gt)))
+			     ;;;;;;;;
+			     ;; generics are unforgiving to choice
+			     ;; so if we have number choice then
+			     ;; let's always force i64 or double
+			     (if (or (equal? tt '(2 4))
+				     (equal? tt '(2 4 7))
+				     (equal? tt '(2 4 7 8)))
+				 (set! tt '(2)))
+			     (if (equal? tt '(0 1))
+				 (set! tt '(0)))
+			     ;;;;;;;;;;
+				 
+
+			     
 			     ;;(println 'avars2: (assoc a vars))
 			     ;(if (and (list? tt) (> (length tt) 1)) (set! tt (list tt)))
 	 		     ;;(println 'a: a 'tt: tt 'gt: gt)
@@ -1715,7 +1746,7 @@
 					  (= (length gt) (length (impc:ir:get-type-from-str (llvm:get-named-type (car tt))))))
 				     (set! tt (impc:ir:get-type-from-str (llvm:get-named-type (car tt))))
 				     (print-error 'Compiler 'Error: 'type 'mismatch 'in 'generics gt '- tt)))
-
+			     
 			     ;; we might be able to update-vars based by matching our request 'gt vs our result 'tt
 			     (for-each
 			      (lambda (aa bb)
@@ -1932,6 +1963,20 @@
 		   (list *impc:ir:void*))))))
 
 
+(define impc:ti:push_zone-check
+  (lambda (ast vars kts request?)
+    (if (<> (length ast) 2)
+	(print-error 'Compiler 'Error: 'bad 'arity 'for (sexpr->string ast)))
+    (impc:ti:type-check (cadr ast) vars kts *impc:ir:si64*)
+    (list "%mzone*")))
+
+
+(define impc:ti:pop_zone-check
+  (lambda (ast vars kts request?)
+    ;(println 'memzonecheck ast (list? (cadr ast)))
+    (list *impc:ir:void*)))
+
+
 (define impc:ti:memzone-check
   (lambda (ast vars kts request?)
     (if (or (> (length ast) 4)
@@ -1944,6 +1989,7 @@
 	(begin (impc:ti:type-check (cadr ast) vars kts *impc:ir:si64*)
 	       (impc:ti:type-check (caddr ast) vars kts *impc:ir:si64*)
 	       (impc:ti:type-check (cadddr ast) vars kts request?)))))
+
 
 
 
@@ -2120,6 +2166,8 @@
 
 (define impc:ti:array-ref-ptr-check
    (lambda (ast vars kts request?)
+      (if (<> (length ast) 3)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))     
       (let ((a (impc:ti:type-check (cadr ast) vars kts '())) ;request?))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
@@ -2136,6 +2184,8 @@
    (lambda (ast vars kts request?)
       ;(println 'request? request?)
       ;(println 'array-ref-check: 'ast: ast 'vars: vars 'kts: kts)
+      (if (<> (length ast) 3)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))
       (let ((a (impc:ti:type-check (cadr ast) vars kts '()))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
@@ -2169,6 +2219,8 @@
    (lambda (ast vars kts request?)
       ;(println 'request? request?)
       ;(println 'vector-ref-check: 'ast: ast 'vars: vars 'kts: kts)
+      (if (<> (length ast) 3)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))     
       (let ((a (impc:ti:type-check (cadr ast) vars kts '()))
             ;; b should be i32
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si32*))))
@@ -2200,6 +2252,8 @@
 
 (define impc:ti:pointer-ref-ptr-check
    (lambda (ast vars kts request?)
+      (if (<> (length ast) 3)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))     
       (let ((a (impc:ti:type-check (cadr ast) vars kts request?))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
@@ -2213,7 +2267,9 @@
 
 (define impc:ti:pointer-ref-check
    (lambda (ast vars kts request?)
-      ;(println 'pointer-ref-check: 'ast: ast 'request? request?) ;'vars: vars 'kts: kts)
+      ;(println 'pointer-ref-check: 'ast: ast 'request? request?) ;'vars: vars 'kts: kts)     
+      (if (<> (length ast) 3)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))     
       (let ((a (impc:ti:type-check (cadr ast) vars kts '())) ;request?))
             ;; b should be fixed point
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si64* *impc:ir:si32*))))
@@ -2333,8 +2389,8 @@
 (define impc:ti:tuple-set-check
    (lambda (ast vars kts request?)
       ;(println 'tsetcheck ast) ; vars kts request?)
-      (if (< (length ast) 4)
-          (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
+      (if (<> (length ast) 4)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))
       ;; (caddr ast) must be an integer 
       (if (not (integer? (caddr ast))) 
           (print-error 'Compiler 'Error: 'tuple-set! 'must 'use 'a 'literal 'integer 'index! ast))
@@ -2417,20 +2473,20 @@
 
 (define impc:ti:tuple-ref-check
    (lambda (ast vars kts request?)
-      ;; (println 'ref-check ast request?) ;kts vars)
+      ;(println 'ref-check ast request?) ;kts vars)
       ;; (caddr ast) must be an integer    
       (if (not (integer? (caddr ast))) 
           (print-error 'Compiler 'Error: 'tuple-ref 'must 'use 'a 'literal 'integer 'index! ast))
       (let* (; a should be a tuple of some kind!
-            (a (impc:ti:type-check (cadr ast) vars kts (if (and (impc:ir:type? request?)
-								(impc:ir:tuple? request?))
-							   request? 
-							   #f))) ;request?))
+            (a (impc:ti:type-check (cadr ast) vars kts #f)) ;(if (and (impc:ir:type? request?)
+							;	(impc:ir:tuple? request?))
+							 ;  request? 
+							  ; #f))) ;request?))
             ;; b should be fixed point -- llvm structs only support 32bit indexes
             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si32*))))
 	(if (impc:ir:type? a)
 	    (set! a (list a)))
-	;(println 'a: a)
+	;(println 'a: a 'b: b (cadr ast))
 	;; check for named types
 	(if (and (not (null? a))
 		 (string? (car a)))
@@ -2452,49 +2508,49 @@
 
 
 ;;(closure-set! closure a i32 5)
-(define impc:ti:closure-set-check
-   (lambda (ast vars kts request?)   
-      ;(println 'ast: ast)
-      (if (< (length ast) 5)
-          (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
-      (let* (;; a should be a closure of some kind
-             (a (if (and (symbol? (cadr ast))
-                         (llvm:get-function (symbol->string (cadr ast))))
-                    #t ; // yes (cadr ast) is a globally defined closure
-                    (impc:ti:type-check (cadr ast) vars kts request?)))
-             ;; b should be a string (the var's name)
-             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si8*)))
-             ;; c should be a string (the type of b)
-             (c (impc:ti:type-check (cadddr ast) vars kts (list *impc:ir:si8*)))
-             ;; d should be a value of type c
-             (d (impc:ti:type-check (car (cddddr ast)) vars kts (impc:ir:get-type-from-str (cadddr ast)))))
-         ;; should return the type requested (i.e. c)
-         (impc:ir:get-type-from-str (cadddr ast)))))
+;; (define impc:ti:closure-set-check
+;;    (lambda (ast vars kts request?)   
+;;       ;(println 'ast: ast)
+;;       (if (<> (length ast) 5)
+;;           (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))
+;;       (let* (;; a should be a closure of some kind
+;;              (a (if (and (symbol? (cadr ast))
+;;                          (llvm:get-function (symbol->string (cadr ast))))
+;;                     #t ; // yes (cadr ast) is a globally defined closure
+;;                     (impc:ti:type-check (cadr ast) vars kts request?)))
+;;              ;; b should be a string (the var's name)
+;;              (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si8*)))
+;;              ;; c should be a string (the type of b)
+;;              (c (impc:ti:type-check (cadddr ast) vars kts (list *impc:ir:si8*)))
+;;              ;; d should be a value of type c
+;;              (d (impc:ti:type-check (car (cddddr ast)) vars kts (impc:ir:get-type-from-str (cadddr ast)))))
+;;          ;; should return the type requested (i.e. c)
+;;          (impc:ir:get-type-from-str (cadddr ast)))))
 
 ;;(closure-ref closure a i32)
-(define impc:ti:closure-ref-check
-   (lambda (ast vars kts request?)     
-      (if (< (length ast) 4)
-          (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
-      (let* (;; a should be a closure of some kind
-             (a (if (and (symbol? (cadr ast))
-                         (llvm:get-function (symbol->string (cadr ast))))
-                    #t ; // yes (cadr ast) is a globally defined closure
-                    (impc:ti:type-check (cadr ast) vars kts request?)))
-             ;; b should be a string (the var's name)
-             (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si8*)))
-             ;; c should be a string (the type of b)
-             (c (impc:ti:type-check (cadddr ast) vars kts (list *impc:ir:si8*))))
-         ;; should return the type requested (i.e. c)
-         (impc:ir:get-type-from-str (cadddr ast)))))
+;; (define impc:ti:closure-ref-check
+;;    (lambda (ast vars kts request?)     
+;;       (if (<> (length ast) 4)
+;;           (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))
+;;       (let* (;; a should be a closure of some kind
+;;              (a (if (and (symbol? (cadr ast))
+;;                          (llvm:get-function (symbol->string (cadr ast))))
+;;                     #t ; // yes (cadr ast) is a globally defined closure
+;;                     (impc:ti:type-check (cadr ast) vars kts request?)))
+;;              ;; b should be a string (the var's name)
+;;              (b (impc:ti:type-check (caddr ast) vars kts (list *impc:ir:si8*)))
+;;              ;; c should be a string (the type of b)
+;;              (c (impc:ti:type-check (cadddr ast) vars kts (list *impc:ir:si8*))))
+;;          ;; should return the type requested (i.e. c)
+;;          (impc:ir:get-type-from-str (cadddr ast)))))
 
 
 ;;(closure-set! closure a i32 5)
 (define impc:ti:closure-set-check
    (lambda (ast vars kts request?)   
       ;(println 'cset 'ast: ast 'request? request?)
-      (if (< (length ast) 4)
-          (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
+      (if (<> (length ast) 5)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))
       (let* (;; a should be a closure of some kind
              (a (if (and (symbol? (cadr ast))
                          (llvm:get-function (symbol->string (cadr ast))))
@@ -2513,8 +2569,8 @@
 (define impc:ti:closure-ref-check
    (lambda (ast vars kts request?)
      ;(println 'cls 'ref 'check: ast 'request? request?)
-      (if (< (length ast) 3)
-          (print-error 'Compiler 'Error: 'missing 'operands 'in (sexpr->string ast)))
+      (if (<> (length ast) 4)
+          (print-error 'Compiler 'Error: 'invalid 'number 'of 'operands 'in (sexpr->string ast)))
       (let* (;; a should be a closure of some kind
              (a (if (and (symbol? (cadr ast))
                          (llvm:get-function (symbol->string (cadr ast))))
@@ -2638,8 +2694,10 @@
                              ;(if (symbol? t) (impc:ti:update-var t vars kts res))
 
                              res))
-                       (cdr ast)
-                       (if (or (null? ctype) 
+                       (cdr ast)	       
+                       (if (or (null? ctype)
+			       (and (number? (car ctype))
+				    (= (car ctype) 211))
                                (not (impc:ir:closure? (car ctype))))
                            (make-list (length (cdr ast)) #f)
                            ;; if we are using an existing definition then check arity
@@ -2666,6 +2724,7 @@
              ;; if there was a request that will be the return type
              ;; otherwise we cannot know it
              (ret (if (and (not (null? ctype))
+			   (not (atom? (car ctype)))
 			   (impc:ir:closure? (car ctype)))
 		      (cadr (car ctype))
 		      (if (and request?
@@ -2780,6 +2839,8 @@
             ((and (list? ast) (member (car ast) '(< > = <>))) (impc:ti:compare-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(dotimes))) (impc:ti:dotimes-check ast vars kts request?))            
             ((and (list? ast) (member (car ast) '(llvm_printf))) (impc:ti:printf-check ast vars kts request?))
+            ((and (list? ast) (member (car ast) '(push_zone))) (impc:ti:push_zone-check ast vars kts request?))
+            ((and (list? ast) (member (car ast) '(pop_zone))) (impc:ti:pop_zone-check ast vars kts request?))	    
             ((and (list? ast) (member (car ast) '(memzone))) (impc:ti:memzone-check ast vars kts request?))
             ((and (list? ast) (member (car ast) '(callback))) (impc:ti:callback-check ast vars kts request?))	    
             ((and (list? ast) (member (car ast) '(llvm_sprintf))) (impc:ti:sprintf-check ast vars kts request?))
@@ -3145,6 +3206,13 @@
 		 ;; (println 'gpoly: (impc:ir:gpoly-types (string->symbol (car (regex:split (symbol->string (car ast)) "\\$\\$\\$")))))
 		 ;; (println 'gpt: (assoc (car ast) types))
 		 ;;(println 'envvars: envvars)
+		 ;; (println 'ast: ast 'types: types)
+		 ;; (println (cdr (assoc (car ast) types)))
+		 
+		 ;; (println 'types)
+		 (if (null? (cdr (assoc (car ast) types)))
+		     (print-error 'Compiler 'Error: 'could 'not 'resolve 'generic: ast 'types: types))
+		 
 		 ;;(println 'prev: prev)		 
 		 (let* ((polyname (string->symbol (car (regex:split (symbol->string (car ast)) "##")))) ;"\\$\\$\\$"))))
 			(type (impc:ir:pretty-print-type (cdr (assoc (car ast) types))))
@@ -3949,7 +4017,8 @@
 	   	 (if *impc:compiler:print* (print-notification "compiled callback"))))	   	    
 
             (if *impc:compile*
-                (let ((ftype (llvm:get-function-args-withoutzone (symbol->string symname)))) 		  
+                (let ((ftype (llvm:get-function-args-withoutzone (symbol->string symname))))
+		  (set! *impc:closuretypes* (cons (cons symname (impc:ir:pretty-print-type (impc:ir:get-type-str (cons (+ *impc:ir:closure* *impc:ir:pointer* *impc:ir:pointer*) ftype)))) *impc:closuretypes*))
                    (if (not *impc:compiler:print-raw-llvm*)
 		       (begin (ascii-print-color 0 7 10)
 			      (print "Compiled ")
@@ -3963,12 +4032,46 @@
 			      (print)))))
             (cadr (impc:ir:gname))))))
 
+(define-macro (xtm-closure-doc name)
+  `(let ((res (assoc (quote ,name) *impc:docstrings*))
+	 (res2 (assoc (quote ,name) *impc:closuretypes*)))
+     (if res
+	 (begin
+	   (ascii-print-color 0 7 10)	   
+	   (print)
+	   (ascii-print-color 1 2 10)	   
+	   (print (quote ,name))
+	   (ascii-print-color 0 7 10)	   
+	   (print " : ")
+	   (ascii-print-color 1 3 10)
+	   (print (cdr res2) "\n")
+	   (ascii-print-color 0 7 10)
+	   (print (cdr res))
+	   ;(ascii-print-color 0 7 10)
+	   (print)
+	   (cons (cdr res) (cdr res2)))
+	 (if res2
+	     (begin
+	       (ascii-print-color 0 7 10)
+	       (print "\n")
+	       (ascii-print-color 1 2 10)	       
+	       (print (quote ,name))
+	       (ascii-print-color 0 7 10) 
+	       (print " : ")
+	       (ascii-print-color 1 3 10)
+	       (print (cdr res2) "\n")
+	       (ascii-print-color 0 7 10)
+	       (cdr res2))
+	     #f))))
 
 ;; definec takes optional type arguments after symname
 (define-macro (definec symname . args)
   (let ((zone-size *impc:default-zone-size*))
     (if (number? (car args))
 	(begin (set! zone-size (car args))
+	       (set! args (cdr args))))
+    (if (string? (car args))
+	(begin (set! *impc:docstrings* (cons (cons symname (car args)) *impc:docstrings*))
 	       (set! args (cdr args))))
     (let ((types (cdr (reverse args)))
 	  (expr (car (reverse args))))
@@ -4203,12 +4306,14 @@
   (if (and (not (impc:ir:pointer? (impc:ir:convert-from-pretty-types type)))
 	   (or (impc:ir:number? (impc:ir:convert-from-pretty-types type)) ;(eval value))
 	       (impc:ir:boolean? (impc:ir:convert-from-pretty-types type)))) ;(eval value))
-       `(begin (if (not (llvm:get-globalvar ,(symbol->string symbol)))
-                   (llvm:compile (string-append "@" ,(symbol->string symbol)
-                                                " = global "
-                                                ,(impc:ir:get-type-str (impc:ir:convert-from-pretty-types type))
-						" "
-						(atom->string ,value))))
+       `(begin (if (llvm:get-globalvar ,(symbol->string symbol))
+		   (print-error 'Compiler 'Error: 'cannot 'rebind ,(symbol->string symbol))
+                   (if (not (llvm:compile (string-append "@" ,(symbol->string symbol)
+							 " = global "
+							 ,(impc:ir:get-type-str (impc:ir:convert-from-pretty-types type))
+							 " "
+							 (atom->string ,value))))
+		       (print-error 'Compiler 'Error: 'cannot 'bind ,(symbol->string symbol) 'bad 'symbol 'name?)))
                ;(ipc:call ,*impc:compiler:process* 'llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       ;(llvm:bind-global-var ,(symbol->string symbol) ,value)
 	       (ascii-print-color 0 7 10)
