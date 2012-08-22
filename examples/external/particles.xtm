@@ -1,23 +1,29 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; A little particle example
-;;
+;;; particles.xtm -- A little particle example
+
+;; Author: Andrew Sorensen
+;; Keywords: extempore
+;; Required dylibs:
+
+;;; Commentary:
+
 ;; Multicoloured stars
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;; Code:
 
 (load "libs/external/opengl.xtm")
 (load "libs/external/particles.xtm")
 
-(define ctx (gl:make-ctx "a" #f 0.0 0.0 900.0 600.0))
+(define ctx (gl:make-ctx ":0" #f 0.0 0.0 900.0 600.0))
 (gl-set-view 900.0 600.0)
 
 (bind-val texture1 i32 0)
 
 (bind-func load-tex
   (lambda (id)
-    (let ((t (gl-load-tex "/Users/mlozanov/Documents/extempore/Horde3D/textures/particles/particle1.tga" id)))      
-      (set! texture1 t))))
+    (let ((t (soil-load-tex-sqr "../../models/Horde3D/textures/particles/star.png" id)))      
+      (set! texture1 t)
+      (printf "texture: %d\n" texture1)
+      void)))
 
 ;; 0 meaning load texture into new id
 (load-tex 0)
@@ -26,27 +32,27 @@
 (bind-func init-psys
   (lambda (psys)
     (let ((xs (psystem_xs psys))
-		  (ys (psystem_ys psys))
-		  (xvs (psystem_xvs psys))
-		  (yvs (psystem_yvs psys))
-		  (sizes (psystem_sizes psys))
-		  (reds (psystem_reds psys))
-		  (greens (psystem_greens psys))
-		  (blues (psystem_blues psys))	    	    
-		  (alphas (psystem_alphas psys))
-		  (states (psystem_states psys))
-		  (i 0))
+	  (ys (psystem_ys psys))
+	  (xvs (psystem_xvs psys))
+	  (yvs (psystem_yvs psys))
+	  (sizes (psystem_sizes psys))
+	  (reds (psystem_reds psys))
+	  (greens (psystem_greens psys))
+	  (blues (psystem_blues psys))	    	    
+	  (alphas (psystem_alphas psys))
+	  (states (psystem_states psys))
+	  (i 0))
       (dotimes (i 5000)
-		(pset! xs i 0.0) ;(dtof (* 10.0 (random))))
-		(pset! ys i 0.0) ;(dtof (* 10.0 (random))))
-		(pset! xvs i (* 20.0 (- (dtof (random)) .5)))
-		(pset! yvs i (* 20.0 (- (dtof (random)) .5)))
-		(pset! sizes i (dtof (* (random) 200.0)))
-		(pset! reds i (dtof (random)))
-		(pset! greens i (dtof (random)))
-		(pset! blues i (dtof (random)))
-		(pset! alphas i (dtof (random)))
-		(pset! states i 100000))
+	(pset! xs i 0.0) ;(dtof (* 10.0 (random))))
+	(pset! ys i 0.0) ;(dtof (* 10.0 (random))))
+	(pset! xvs i (* 20.0 (- (dtof (random)) .5)))
+	(pset! yvs i (* 20.0 (- (dtof (random)) .5)))
+	(pset! sizes i (dtof (* (random) 200.0)))
+	(pset! reds i (dtof (random)))
+	(pset! greens i (dtof (random)))
+	(pset! blues i (dtof (random)))
+	(pset! alphas i (dtof (random)))
+	(pset! states i 100000))
       void)))
 
 ;; gl-code 	  
