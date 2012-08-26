@@ -4873,25 +4873,51 @@ static pointer opexe_2(scheme *sc, enum scheme_opcodes op) {
     return -1;
 }
 
-// keys of assoc lst MUST be strings
+
+// keys of assoc lst MUST be strings OR symbols
 /*static*/ pointer assoc_strcmp(scheme *sc, pointer key, pointer lst) {
     pointer x;
     pointer pair;
+    pointer r1;
     char* lkey;
-    const char* skey = strvalue(key);
-    for (x = lst; is_pair(x); x = cdr(x)) {
-      pair = pair_car_sc(sc,x);
-      if(is_pair(pair)) {
-      	lkey = strvalue(pair_car_sc(sc,pair));
-      	if(0 == strcmp(lkey,skey)) {
-      	  return pair;
-      	}		
-      } else {
-      	return sc->F;
-      }      	
+    char* skey;
+
+    if(is_symbol(key)) {
+      skey = strvalue(car(key));
+      for (x = lst; is_pair(x); x = cdr(x)) {
+	pair = pair_car_sc(sc,x);
+	if(is_pair(pair)) {
+	  r1 = pair_car_sc(sc,pair);
+	  if(!is_symbol(r1)) return sc->F;
+	  lkey = strvalue(car(r1));
+	  if(0 == strcmp(lkey,skey)) {
+	    return pair;
+	  }		
+	} else {
+	  return sc->F;
+	}      	
+      }
+    } else if(is_string(key)) {
+      skey = strvalue(key);
+      for (x = lst; is_pair(x); x = cdr(x)) {
+	pair = pair_car_sc(sc,x);
+	if(is_pair(pair)) {
+	  lkey = strvalue(pair_car_sc(sc,pair));
+	  if(0 == strcmp(lkey,skey)) {
+	    return pair;
+	  }		
+	} else {
+	  return sc->F;
+	}      	
+      }      
+    } else {
+      // it not neccessarily a problem for the key to be a non-symbol/string
+      // although it should return false of course
+      // which it does after falling through to the final return
     }
     return sc->F;
 }
+    
 
 /*static*/ pointer list_ref(scheme *sc, const int pos, pointer a) {
     pointer x;	
