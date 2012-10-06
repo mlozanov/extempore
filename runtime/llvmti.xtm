@@ -512,7 +512,7 @@
                  ;; (ttype (impc:ir:get-type-from-pretty-str (symbol->string ntype)))
                  (depth (impc:ir:get-ptr-depth (car split)))
                  (base (impc:ir:get-base-type (car split)))
-                 (ts (regex:split (cadr split) ","))
+                 (ts (cdr split)) ;(regex:split (cadr split) ","))
                  (hash 0)
                  (newtype (symbol->string ntype)))
             (if (<> (length ts) (length gvars))
@@ -531,18 +531,27 @@
 
 
 ;; takes any type with generic specialisations
-;; and returns tye type with any specialisations (i.e. ~'s)
+;; and returns type with any specialisations (i.e. ~'s)
 ;; turned into proper hashed named types
+;;
+;; currently this only works when there is a SINGLE ~ type
 (define impc:ti:generic-spec-to-hashed
   (lambda (t)
     (if (symbol? t) (set! t (symbol->string t)))
-    (let* ((v (regex:matched t "[^<>,]*~[^<>,]*"))
-           (s (impc:ti:generic-type-specification (string->symbol (car v))))
-           (n (regex:replace t (string-append "\\Q" (car v) "\\E") (symbol->string s))))
+    (let* ((aa (regex:matched t "~.*~"))
+           (bb (regex:matched t "[^~]*[,\\[<]([^~]*)"))
+           ;; (kkkkk (println 'aa: aa))
+           ;; (kkkkkk (println 'bb: bb))
+           (v (if (or (null? aa)
+                      (null? bb))
+                  (print-error 'Compiler 'Error: 'trying 'to 'parse 'generic 'spec 'without '~ t)
+                  (string-append (cadr bb) (car aa))))
+           (s (impc:ti:generic-type-specification (string->symbol v)))
+           (n (regex:replace t (string-append "\\Q" v "\\E") (symbol->string s))))
+      ;; (println 'v v 's s 'n n)
       (if (regex:match? n "~")
           (impc:ti:generic-spec-to-hashed n)
           (string->symbol n)))))
-
 
     
 (define *unique-polynum* 0)
@@ -674,6 +683,7 @@
                 (else (cond ((eq? ast #f) '(impc_false))
                             ((eq? ast #t) '(impc_true))
 			    ((eq? ast 'cast) 'bitcast)
+			    ((eq? ast 'convert) 'bitconvert)                            
 			    ((eq? ast '&) 'bitwise-and)
 			    ((eq? ast 'bor) 'bitwise-or) ; can't use a pipe
 			    ((eq? ast '^) 'bitwise-eor)
@@ -871,7 +881,10 @@
 		(llvm:compile (string-append "%" newname " = type " newtype3))
 		;; next we should try to normalize the newtype
 		(let* ((newtype4 (impc:ti:type-normalize (impc:ir:get-type-from-str (apply string-append newtype3 (make-list-with-proc ptrdepth (lambda (kk) "*"))))))
-		       (newtype5 (impc:ir:get-type-str newtype4))
+		       ;; (newtype5 (impc:ir:get-type-str newtype4))
+		       (newtype5 (if (impc:ir:tuple? newtype4)
+                                     (impc:ir:get-type-str newtype4)
+                                     (impc:ir:get-type-str newtype3)))
 		       (newtype6 (apply string-append "%" newname (make-list ptrdepth "*"))))
 		  ;; (println 'newtype newtype6 'vs: vs 'type: newtype4 't1: t1)
 		  (impc:ti:update-var vs vars '() newtype6) ; newtype4))
@@ -1720,32 +1733,37 @@
 
 
 (define impc:ti:numeric-check
-   (lambda (ast vars kts request?)      
-      (if *impc:ti:print-sub-checks* (println 'num:> 'ast: ast 'request? request?))
-      (if (and request?
-               (not (null? request?)))
-          (cond ((symbol? request?) 
-                 (let* ((t1 (impc:ti:symbol-check request? vars kts #f))
-                        (t2 (impc:ti:numeric-check ast vars kts #f))
-                        (t3 (cl:intersection t1 t2)))
-		    (if (null? t1) t2 t3)))
-                ((list? request?)
-                 (let* ((t1 (impc:ti:numeric-check ast vars kts #f))
-                        (t2 (cl:intersection request? t1)))
-                    t2))
-                ((number? request?)
-                 (let* ((t1 (impc:ti:numeric-check ast vars kts #f))
-                        (t2 (cl:intersection (list request?) t1)))
-                    t2))
-                (else (print-error 'Compiler 'Error: 'shouldn't 'reach 'here 'in 'numeric 'check 'request? request?)
-		      (print-error '-> 'You 'might 'be 'using 'a 'pref 'where 'you 'should 'be 'using 'a 'tref?)))
-          (if (integer? ast)  ;; preference goes to start of list
-	      (if (or (= 1 ast) (= 0 ast))
-	      	  (list *impc:ir:si64* *impc:ir:si32* *impc:ir:ui8* *impc:ir:i1*)
-		  (if (< ast 256)
-		      (list *impc:ir:si64* *impc:ir:si32* *impc:ir:ui8*)
-		      (list *impc:ir:si64* *impc:ir:si32*)))  ;*impc:ir:double* *impc:ir:float*))
-              (list *impc:ir:double* *impc:ir:float*)))))
+  (lambda (ast vars kts request?)
+    ;; (println 'ast: ast 'request? request?)
+    (if *impc:ti:print-sub-checks* (println 'num:> 'ast: ast 'request? request?))
+    (if (and request?
+             (not (null? request?)))
+        (cond ((symbol? request?) 
+               (let* ((t1 (impc:ti:symbol-check request? vars kts #f))
+                      (t2 (impc:ti:numeric-check ast vars kts #f))
+                      (t3 (cl:intersection t1 t2)))
+                 (if (null? t1) t2 t3)))
+              ((list? request?)
+               (let* ((t1 (impc:ti:numeric-check ast vars kts #f))
+                      (t2 (cl:intersection request? t1)))
+                 t2))
+              ((number? request?)
+               (let* ((t1 (impc:ti:numeric-check ast vars kts #f))
+                      (t2 (cl:intersection (list request?) t1)))
+                 t2))
+              ((string? request?)
+               (let* ((t1 (impc:ti:numeric-check ast vars kts #f))
+                      (t2 (cl:intersection (list request?) t1)))
+                 t2))
+              (else (print-error 'Compiler 'Error: 'shouldn't 'reach 'here 'in 'numeric 'check 'request? request?)
+                    (print-error '-> 'You 'might 'be 'using 'a 'pref 'where 'you 'should 'be 'using 'a 'tref?)))
+        (if (integer? ast)  ;; preference goes to start of list
+            (if (or (= 1 ast) (= 0 ast))
+                (list *impc:ir:si64* *impc:ir:si32* *impc:ir:ui8* *impc:ir:i1*)
+                (if (< ast 256)
+                    (list *impc:ir:si64* *impc:ir:si32* *impc:ir:ui8*)
+                    (list *impc:ir:si64* *impc:ir:si32*)))  ;*impc:ir:double* *impc:ir:float*))
+            (list *impc:ir:double* *impc:ir:float*)))))
 
 
 ;; IS NEW
@@ -1753,6 +1771,13 @@
    (lambda (ast vars kts request?)
       (if (not (symbol? ast)) (print-error 'Tyring 'to 'symbol 'check 'a 'non-symbol: ast))
       ;; (println 'symbolcheck 'ast: ast 'vars: vars 'request: request?)
+      ;; if we get a generic function here it means that someone
+      ;; is trying to pass it as a value (which is illegal!)
+      (if (and (symbol? ast)
+               (impc:ir:gpoly-types (string->symbol (impc:ir:get-base-type (symbol->string ast)))))
+               ;; (regex:match? (symbol->string ast) "##")
+               ;; (not (regex:match? (symbol->string ast) "!")))
+          (print-error 'Compiler 'Error: 'trying 'to 'use 'generic 'function 'as 'value: ast))
       (if *impc:ti:print-sub-checks* (println 'sym:> 'ast: ast 'request? request?))
       ;; if a request is made - assume it's forced
       ;; find the intersection between the request
@@ -2458,9 +2483,9 @@
 						 (cddr type)))
 					   (ct2 (map (lambda (ct ft) ;; checked type against poly type
 						       ;; (println 'ct: ct 'ft: ft)
-						       (if (number? ct)
+						       (if (and (number? ct) (number? ft))
 							   (if (= ct ft) #t #f)
-							   (if (string? ct)
+							   (if (and (string? ct) (string? ft))
 							       (if (string=? ct ft) #t #f)
 							       (if (list? ct)
 								   #f ;;(if (member ft ct) #t #f)
@@ -2698,11 +2723,24 @@
 		 
 
 (define impc:ti:bitcast-check
-   (lambda (ast vars kts request?)
-      ;; for the symbols we want to set each return type
-      ;(impc:ti:update-var (cadr ast) vars kts (impc:ir:convert-from-pretty-types (caddr ast)))
-      (list (impc:ir:convert-from-pretty-types (caddr ast)))))
-		 
+  (lambda (ast vars kts request?)
+    ;; (println 'bitcastcheck'req: request?)
+    (if (null? (cddr ast))
+        (if request? (list request?) (list))
+        ;; for the symbols we want to set each return type
+        ;;(impc:ti:update-var (cadr ast) vars kts (impc:ir:convert-from-pretty-types (caddr ast)))
+        (list (impc:ir:convert-from-pretty-types (caddr ast))))))
+
+
+(define impc:ti:bitconvert-check
+  (lambda (ast vars kts request?)
+    ;; (println 'bitcastcheck'req: request?)
+    (if (null? (cddr ast))
+        (if request? (list request?) (list))
+        ;; for the symbols we want to set each return type
+        ;;(impc:ti:update-var (cadr ast) vars kts (impc:ir:convert-from-pretty-types (caddr ast)))
+        (list (impc:ir:convert-from-pretty-types (caddr ast))))))
+
 
 (define impc:ti:if-check
    (lambda (ast vars kts request?)
@@ -3415,6 +3453,7 @@
             ((and (list? ast) (member (car ast) '(null?))) (impc:ti:null?-check ast vars kts request?))
 	    ((and (list? ast) (member (car ast) '(impc_null))) (impc:ti:null-check ast vars kts request?))
 	    ((and (list? ast) (member (car ast) '(bitcast))) (impc:ti:bitcast-check ast vars kts request?))
+	    ((and (list? ast) (member (car ast) '(bitconvert))) (impc:ti:bitconvert-check ast vars kts request?))
 	    ((and (list? ast) (member (car ast) '(void))) (impc:ti:void-check ast vars kts request?))
 	    ((and (list? ast) ;; generic function		  
 		  (symbol? (car ast))
@@ -4778,24 +4817,35 @@ deprecated - use bind-func instead."
 
 ;; alias for definec (should replace definec)
 (define-macro (bind-func . args)
+  (if (impc:ir:poly-types (car args))
+      (print-error 'Compiler 'Error: (car args) 'already 'bound 'as 'poly 'function))
+  (if (impc:ir:gpoly-types (car args))
+      (print-error 'Compiler 'Error: (car args) 'already 'bound 'as 'generic 'closure))
   (if (regex:match? (symbol->string (car args)) ":")
       (let ((res (regex:split (symbol->string (car args)) ":")))
+        ;(println 'res: res)
 	(if (or (regex:match? (cadr res) "!")
 		(cl:find-if (lambda (v) (eq? v #t))
 			    (map (lambda (k)
 				   (if (assoc (string->symbol k) *impc:ir:gpolytypes*) #t #f))
-				 (regex:split (cadr res) "[,|*\\[\\]]"))))
-	    (begin (impc:ir:add-gpoly (cons 'bind-func args))
-		   `(begin (ascii-print-color 0 7 10)
-			   (print "Added generic ")
-			   (ascii-print-color 1 2 10)
-			   (print ,(car res))
-			   (ascii-print-color 0 7 10)
-			   (print " >>> ")
-			   (ascii-print-color 1 3 10)
-			   (print ,(cadr res))
-			   (ascii-print-color 0 7 10)
-			   (print)))
+				 (regex:split (cadr res) "[~,|*\\[\\]]"))))
+	    (begin (if (regex:match? (cadr res) "~") ;; if this is a specialized type then we probably aren't generic
+                       (begin (set-car! args (string->symbol (string-append (car res) ":" (symbol->string (impc:ti:generic-spec-to-hashed (string->symbol (cadr res)))))))
+                              ;; (println 'args: args)
+                              `(bind-func ,@args))
+                              ;; `(impc:ti:parametric-poly-pass '(definec ,@args)))
+                       (begin
+                         (impc:ir:add-gpoly (cons 'bind-func args))
+                         `(begin (ascii-print-color 0 7 10)
+                                 (print "Added generic ")
+                                 (ascii-print-color 1 2 10)
+                                 (print ,(car res))
+                                 (ascii-print-color 0 7 10)
+                                 (print " >>> ")
+                                 (ascii-print-color 1 3 10)
+                                 (print ,(cadr res))
+                                 (ascii-print-color 0 7 10)
+                                 (print)))))
 	    `(impc:ti:parametric-poly-pass '(definec ,@args))))
       `(impc:ti:parametric-poly-pass '(definec ,@args))))
 
@@ -5096,6 +5146,8 @@ deprecated - use bind-func instead."
 
 
 (define-macro (bind-poly poly_sym implementation_sym)
+  (if (impc:ir:gpoly-types implementation_sym)
+      (print-error 'Compiler 'Error: 'bind-poly 'only 'accepts 'monomorphic 'functions 'not: implementation_sym))
   (let ((type (impc:ir:get-function-type implementation_sym)))
     ;(set! type (impc:ir:get-type-from-pretty-str (symbol->string type)))
     `(begin (impc:ir:add-poly ',poly_sym ',implementation_sym ',type)
