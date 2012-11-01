@@ -245,6 +245,7 @@ namespace extemp {
 	    { "cptr:set-double",            &SchemeFFI::dataSETdouble },
 	    { "cptr->string",            &SchemeFFI::cptrToString },
 	    { "cptr:get-string",            &SchemeFFI::cptrToString },
+	    { "string->cptr",            &SchemeFFI::stringToCptr },
 	    { "string-strip",		&SchemeFFI::stringStrip },
 	    { "string-hash",		&SchemeFFI::stringHash },
 	    { "string-join",		&SchemeFFI::stringJoin },
@@ -421,10 +422,18 @@ namespace extemp {
     }
 
     pointer SchemeFFI::cptrToString(scheme* _sc, pointer args)
-    {       
+    {
         char* cptr = (char*) cptr_value(pair_car(args));
 	char* cstr = (char*) cptr;
 	return mk_string(_sc, cstr);
+    }
+
+    pointer SchemeFFI::stringToCptr(scheme* _sc, pointer args)
+    {
+        char* cstr = (char*) cptr_value(pair_car(args));
+	char* cptr = (char*) malloc(strlen(cstr) + 1);
+        strcpy(cptr, cstr);
+	return mk_cptr(_sc, cptr);
     }
 
     pointer SchemeFFI::asciiColor(scheme* _sc, pointer args)
@@ -467,10 +476,12 @@ namespace extemp {
     }
 
     pointer SchemeFFI::makeCptr(scheme* _sc, pointer args)
-    {
-        void* ptr = malloc(ivalue(pair_car(args)));
-	    return mk_cptr(_sc, ptr);
-    }
+    {                                                     
+         long num_bytes = ivalue(pair_car(args));            
+         void* ptr = malloc(num_bytes);                      
+         memset(ptr,0,num_bytes);                            
+         return mk_cptr(_sc, ptr);                           
+    }                                                     
 
 #ifdef EXT_BOOST
 	pointer SchemeFFI::dirlist(scheme* _sc, pointer args)
@@ -1628,18 +1639,18 @@ namespace extemp {
 
 	    tmp_name = ss2.str().c_str();
 
-	    if(a->getType()->isStructTy()) {	      
-	      rsplit(" = type ",(char*)tmp_name,tmp_str_a,tmp_str_b);
-	      //printf("tmp:%s  a:%s  b:%s\n",(char*)tmp_name,tmp_str_a,tmp_str_b);
-	      //tmp_name = tmp_str_b;
-	      tmp_name = tmp_str_a;
-	    }
+	    // if(a->getType()->isStructTy()) {	      
+	    //   rsplit(" = type ",(char*)tmp_name,tmp_str_a,tmp_str_b);
+	    //   printf("tmp:%s  a:%s  b:%s\n",(char*)tmp_name,tmp_str_a,tmp_str_b);
+	    //   //tmp_name = tmp_str_b;
+	    //   tmp_name = tmp_str_a;
+	    // }
 
 	    pointer str = mk_string(_sc, tmp_name); //_sc, ss2.str().c_str()); //a->getType()->getDescription().c_str());
 	    _sc->imp_env->erase(p);
 	    p = cons(_sc, str, p);			
 	    funcargs++;
-	}			
+	}
 	return reverse(_sc, p);				
     }
 
