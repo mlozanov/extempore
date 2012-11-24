@@ -64,7 +64,9 @@
 #include <arpa/inet.h>
 #endif
 
+#ifndef TARGET_OS_WINDOWS
 #include <unistd.h>
+#endif
  
 //#include "llvm/Analysis/DebugInfo.h"
 //#include "llvm/Analysis/Verifier.h"
@@ -1124,7 +1126,7 @@ namespace extemp {
 	    FILE* fp;
 	    if((fp = fopen(load_path,"rb")) == NULL)
 	    {
-		printf("Could not open %s",load_path);
+		printf("Could not open %s\n",load_path);
 		exit(1);
 	    }
 			
@@ -1338,6 +1340,8 @@ namespace extemp {
 	    EE->updateGlobalMapping(gv,(void*)&mk_cptr);
 	    gv = M->getNamedValue(std::string("is_cptr"));
 	    EE->updateGlobalMapping(gv,(void*)&is_cptr);
+	    gv = M->getNamedValue(std::string("is_cptr_or_str"));
+	    EE->updateGlobalMapping(gv,(void*)&is_cptr_or_str);
             
 
 	    gv = M->getNamedValue(std::string("list_ref"));

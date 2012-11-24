@@ -218,7 +218,7 @@
 	(begin (printf "a: %lld\n" a)
 	       (recursive-closure-test (- a 1))))))
 
-(test-xtfunc (recursive-closure-test 3c))
+(test-xtfunc (recursive-closure-test 3))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; a simple tuple example
@@ -635,13 +635,14 @@
 
 (test-xtfunc (test_g_cstring1) 5)
 
-;; ;; need to load adt.xtm first
-;; (bind-func test_g_cstring2
-;;   (lambda ()
-;;     (xstring_levenshtein (xstring g_cstring)
-;;                          (xstring g_cstring))))
+(load "libs/core/xstring.xtm")
 
-;; (test-xtfunc (test_g_cstring2) 0)
+(bind-func test_g_cstring2
+  (lambda ()
+    (xstring_levenshtein (xstring g_cstring)
+                         (xstring g_cstring))))
+
+(test-xtfunc (test_g_cstring2) 0)
 
 
 
@@ -1519,6 +1520,36 @@
 			 (xstring "bor"))))
 
 (test-xtfunc (test_xstring_levenshtein) 2)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; syntax highlighting tests ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; these don't return any values, they're visual tests---do they look
+;; right?
+
+(bind-func hl_test1a:[i32,double,|4,i32|**]* 4000
+  "docstring"
+  (lambda (a b)
+    (printf "done\n")))
+
+(bind-func hl_test1b:[i32]*
+  (lambda ()
+    (let ((i:i32 6))
+      (printf "done\n"))))
+
+(bind-val hl_test2 <i32,i32>)
+(bind-val hl_test3 |4,i8|)
+(bind-val hl_test4 double* 10)
+(bind-val hl_test5 i8* "teststr")
+
+(bind-type hl_test_type <i64>)
+
+(println '(bind-lib testlib testfn [i32,i32]*))
+
+;; (and 4 5)
+;; (bind-val hl_test4 double* 10)
+;; (bind-type hl_test_type <i64>)
+;; (bind-lib testlib testfn [i32,i32]*)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; FINISH!
