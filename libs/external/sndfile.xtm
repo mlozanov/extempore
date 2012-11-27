@@ -10,6 +10,8 @@
 
 ;;; Code:
 
+(load "libs/core/audio_dsp.xtm")
+
 ;; load the libsndfile dynamic library
 (define libsndfile
   (let ((platform (sys:platform)))
@@ -29,7 +31,7 @@
 (bind-lib libsndfile sf_write_double [i64,i8*,double*,i64]*)
 (bind-lib libsndfile sf_strerror [i8*,i8*]*)
 
-;; struct accessor macros
+;; struct accessors
 
 (bind-func sf_frames
   (lambda (info:sf_info*)
@@ -92,7 +94,7 @@
       samples_read)))
 
 ;; an audio buffer reader (closure version)
-(bind-func make_audio_closure
+(bind-func audiofile_c
   (lambda (fname offset num)
     (let ((info:sf_info* (zalloc))
           (audio_file (sf_open fname 16 info))
