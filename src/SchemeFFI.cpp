@@ -95,6 +95,7 @@
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Instructions.h"
+#include "llvm/Bitcode/ReaderWriter.h"
 //#include "llvm/ModuleProvider.h"
 #include "llvm/ExecutionEngine/JIT.h"
 #include "llvm/ExecutionEngine/Interpreter.h"
@@ -298,6 +299,7 @@ namespace extemp {
 	    { "llvm:add-llvm-alias",                          &SchemeFFI::add_llvm_alias },
 	    { "llvm:get-llvm-alias",                          &SchemeFFI::get_llvm_alias },
 	    { "llvm:get-named-type",                          &SchemeFFI::get_named_type },
+	    { "llvm:export-module",                          &SchemeFFI::export_llvmmodule_bitcode },
 	    { "impc:ir:getname",			&SchemeFFI::impcirGetName },
 	    { "impc:ir:gettype",			&SchemeFFI::impcirGetType },		
 	    { "impc:ir:addtodict",			&SchemeFFI::impcirAdd },
@@ -1603,6 +1605,27 @@ namespace extemp {
     }
 
 
+    pointer SchemeFFI::export_llvmmodule_bitcode(scheme* _sc, pointer args)
+    {
+	using namespace llvm;
+
+	Module* M = EXTLLVM::I()->M;
+	if(M == 0)
+	{
+	    return _sc->F;
+	}			
+        
+        char* filename = string_value(pair_car(args));
+        std::string errinfo;
+	llvm::raw_fd_ostream ss(filename,errinfo);
+        if(errinfo.length()>0) {
+          std::cout << errinfo << std::endl;
+          return _sc->F;
+        }
+        llvm::WriteBitcodeToFile(M,ss);
+	return _sc->T;
+    }
+
     pointer SchemeFFI::get_function_args(scheme* _sc, pointer args)
     {
 	using namespace llvm;
@@ -2870,7 +2893,8 @@ namespace extemp {
     if ( swapFlag )
       glXSwapBuffers(dpy, glxWin);
 
-    swapInterval(0);    
+    if(swapInterval!=0)
+	swapInterval(0);    
 
     pointer list = _sc->NIL;
     _sc->imp_env->insert(list);
