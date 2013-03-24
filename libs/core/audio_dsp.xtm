@@ -28,11 +28,15 @@
 ;; usually NOT
 (define *build-multi-chan* #f)
 
-;; bind some global audio values 
-(bind-val SAMPLERATE double (integer->real *au:samplerate*))
-(bind-val CHANNELS i64 *au:channels*)
-(bind-val IN_CHANNELS i64 *au:in-channels*)
-(bind-val FRAMES i64 *au:block-size*)
+;; bind some global audio values
+(if (not (llvm:get-globalvar "SAMPLERATE"))
+    (bind-val SAMPLERATE double (integer->real *au:samplerate*)))
+(if (not (llvm:get-globalvar "CHANNELS"))
+    (bind-val CHANNELS i64 *au:channels*))
+(if (not (llvm:get-globalvar "IN_CHANNELS"))
+    (bind-val IN_CHANNELS i64 *au:in-channels*))
+(if (not (llvm:get-globalvar "FRAMES"))
+    (bind-val FRAMES i64 *au:block-size*))
 
 (bind-alias DSP [double,double,double,double,double*]*)
 
@@ -55,7 +59,7 @@
 ;; gaussian random number X ~ N(0,1)
 ;; algorithm by Marsaglia http://c-faq.com/lib/gaussian.html
 
-(bind-func randn
+(bind-func dsp_randn
   (let ((phase 0))
     (lambda ()
       (let ((u1 (random))
@@ -65,7 +69,7 @@
 	    (s (+ (* v1 v1) (* v2 v2))))
 	(if (= phase 0)
 	    (if (or (> s 1.0) (= s 0.0) (= s 1.0))
-		(randn)
+		(dsp_randn)
 		(* v1 (sqrt (/ (* -2.0 (log s)) s))))
 	    (begin (set! phase (- 1 phase))
 		   (* v2 (sqrt (/ (* -2.0 (log s)) s)))))))))
@@ -181,7 +185,7 @@
 (bind-func white_c
   (lambda ()
     (lambda ()
-      (* 0.33 (randn)))))
+      (* 0.33 (dsp_randn)))))
 
 ;; pink noise generator
 ;; uses Paul Kellet's economy method
@@ -190,10 +194,10 @@
   (lambda ()
     (let ((b0 0.0) (b1 0.0) (b2 0.0))
       (lambda ()
-        (set! b0 (+ (* b0 0.99765) (* (randn) 0.0555179)))
-        (set! b1 (+ (* b1 0.96300) (* (randn) 0.2965164)))
-        (set! b2 (+ (* b2 0.57000) (* (randn) 1.0526913)))
-        (* 0.33 (+ b0 b1 b2 (* (randn) 0.1848)))))))
+        (set! b0 (+ (* b0 0.99765) (* (dsp_randn) 0.0555179)))
+        (set! b1 (+ (* b1 0.96300) (* (dsp_randn) 0.2965164)))
+        (set! b2 (+ (* b2 0.57000) (* (dsp_randn) 1.0526913)))
+        (* 0.33 (+ b0 b1 b2 (* (dsp_randn) 0.1848)))))))
 
 ;; pulse train
 (bind-func pulse_c
@@ -252,14 +256,14 @@
 	  (in_head 0)
 	  (out_head 0)
 	  (delay_ (i64tod max_delay))
-	  (delay (i64tod max_delay))
+	  ;;(delay (i64tod max_delay))
 	  (alpha 0.0)
 	  (om_alpha 1.0)
 	  (in 1.0)
 	  (i 0)
 	  (out 0.5))
       (dotimes (i max_delay) (pset! line i 0.0))
-      (lambda (x:double)
+      (lambda (x:double delay:double)
 	(if (<> delay delay_)
 	    (begin (set! delay_ delay)		 
 		   (set! alpha (- delay (floor delay)))
@@ -282,13 +286,12 @@
     (bind-func comb_mc_c
       (lambda (channels:i64 max_delay)
 	(let ((dlines:[double,double]** (alloc channels))
-	      (delay (i64tod max_delay))
+	      ;;(delay (i64tod max_delay))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! dlines i (comb_c max_delay)))
-	  (lambda (chan x)
+	  (lambda (chan x delay)
 	    (let ((f (pref dlines (dtoi32 chan))))
-	      (f.delay delay)
-	      (f x)))))))
+	      (f x delay)))))))
 
 
 ;; flanger
@@ -297,8 +300,7 @@
     (let ((comb (comb_c (dtoi64 (+ delay mod_range))))
 	  (mod (osc_c mod_phase)))
       (lambda (x:double)
-	(comb.delay (+ delay (mod mod_range mod_rate)))
-	(comb x)))))
+	(comb x (+ delay (mod mod_range mod_rate)))))))
 
 
 (if *build-multi-chan*
@@ -308,8 +310,7 @@
 	      (mod (osc_mc_c mod_phase))
 	      (i:i64 0))
 	  (lambda (chan x)
-	    (comb.delay (+ delay (mod chan mod_range mod_rate)))
-	    (comb chan x))))))
+	    (comb chan x (+ delay (mod chan mod_range mod_rate))))))))
 
 
 ;; chorus
@@ -337,12 +338,9 @@
       (comb2.in .5)
       (comb3.in .5)
       (lambda (x:double)
-	(comb1.delay (+ dly1 (mod1 mrng1 mrte1)))
-	(comb2.delay (+ dly2 (mod2 mrng2 mrte2)))
-	(comb3.delay (+ dly3 (mod3 mrng3 mrte3)))
-	(+ (comb1 x)
-	   (comb2 x)
-	   (comb3 x))))))
+	(+ (comb1 x (+ dly1 (mod1 mrng1 mrte1)))
+	   (comb2 x (+ dly2 (mod2 mrng2 mrte2)))
+	   (comb3 x (+ dly3 (mod3 mrng3 mrte3))))))))
 
 (if *build-multi-chan*
     (bind-func chorus_mc_c
@@ -429,7 +427,6 @@
 (bind-func reverb_c
   (lambda (size) ; size in ms
     (let ((ms (/ SAMPLERATE 1000.0))
-	  (wet .25)
 	  (dly1 (delay_c (dtoi64 (* ms (* .192 size)))))
 	  (dly2 (delay_c (dtoi64 (* ms (* .373 size)))))
 	  (dly3 (delay_c (dtoi64 (* ms (* .671 size)))))
@@ -440,7 +437,7 @@
       (ap1.g .8)
       (ap2.g .7)
       (ap3.g .6)
-      (lambda (in)
+      (lambda (in wet)
 	(let ((wetin (* in wet)))
 	  (+ (* in (- 1.0 wet))
 	     (ap1 (ap2 (ap3 (+ (dly1 wetin)
@@ -461,9 +458,9 @@
 
 ;; a dodgy bitcrusher
 (bind-func crusher_c
-  (lambda (bits)
+  (lambda ()
     (let ((amp 1.0))
-      (lambda (in)
+      (lambda (in bits)
 	(* amp (/ (floor (* in (pow 2. bits))) 
 		  (pow 2. bits)))))))
 
@@ -518,10 +515,9 @@
 	   (a0 0.0)
 	   (a1 0.0)
 	   (a2 0.0)
-	   (res 0.25)
 	   (oldres 0.0)
 	   (oldfreq 0.0))
-      (lambda (x freq)
+      (lambda (x freq res)
 	;; if frequency changes
 	;; recalculate coefficients
 	(if (or (<> freq oldfreq)
@@ -555,9 +551,9 @@
 	(let ((lines:[double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (lpf_c)))
-	  (lambda (chan x freq)
+	  (lambda (chan x freq res)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f x freq)))))))
+	      (f x freq res)))))))
 
 
 ;; biquad high-pass filter
@@ -573,10 +569,9 @@
 	   (a0 0.0)
 	   (a1 0.0)
 	   (a2 0.0)
-	   (res 0.25)
 	   (oldres 0.0)
 	   (oldfreq 0.0))
-      (lambda (x freq)
+      (lambda (x freq res)
 	;; if frequency changes
 	;; recalculate coefficients
 	(if (or (<> freq oldfreq)
@@ -610,9 +605,9 @@
 	(let ((lines:[double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (hpf_c)))
-	  (lambda (chan x freq)
+	  (lambda (chan x freq res)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f x freq)))))))
+	      (f x freq res)))))))
 
 
 ;; biquad band-pass filter
@@ -628,11 +623,10 @@
 	   (a0 0.0)
 	   (a1 0.0)
 	   (a2 0.0)
-	   (bandwidth 0.5)
 	   (oldfreq 0.0)
 	   (oldbw 0.0))
       ;; bandwidth in octaves
-      (lambda (x freq)
+      (lambda (x freq bandwidth)
 	;; if frequency or bandwidth change
 	;; recalculate coefficients
 	(if (or (<> freq oldfreq)
@@ -669,9 +663,9 @@
 	(let ((lines:[double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (bpf_c)))
-	  (lambda (chan x freq)
+	  (lambda (chan x freq bandwidth)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f x freq)))))))
+	      (f x freq bandwidth)))))))
 
 
 ;; biquad notch filter
@@ -687,11 +681,10 @@
 	   (a0 0.0)
 	   (a1 0.0)
 	   (a2 0.0)	     
-	   (bandwidth 0.5) ; in ocatves
 	   (oldfreq 0.0)
 	   (oldbw 0.0))
       ;; bandwidth in octaves
-      (lambda (x freq)
+      (lambda (x freq bandwidth)
 	;; if frequency or bandwidth change
 	;; recalculate coefficients
 	(if (or (<> freq oldfreq)
@@ -727,9 +720,9 @@
 	(let ((lines:[double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (notch_c)))
-	  (lambda (chan x freq)
+	  (lambda (chan x freq bandwidth)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f x freq)))))))
+	      (f x freq bandwith)))))))
 
 ;; Hilbert transform filter
 
@@ -771,13 +764,10 @@
 ;;
 (bind-func vcf_c
   (lambda ()
-    (let ((res 0.5) ;; 0.0 - 1.0
-	  (x 0.0) (y1 0.0) (y2 0.0) (y3 0.0) (y4 0.0)
+    (let ((x 0.0) (y1 0.0) (y2 0.0) (y3 0.0) (y4 0.0)
 	  (oldx 0.0) (oldy1 0.0) (oldy2 0.0) (oldy3 0.0))
-      (lambda (in cutoff)
-	(let (;(f (* 2.0 (/ cutoff SAMPLERATE)))
-                                        ;(f (* 1.8 (/ cutoff SAMPLERATE)))
-	      (f (* 1.75 (/ cutoff SAMPLERATE)))
+      (lambda (in cutoff res)
+	(let ((f (* 1.75 (/ cutoff SAMPLERATE)))
                                         ;(k (- (* 2.0 (sin (* f (/ PI 2.0)))) 1.0))
 	      (k (- (- (* 3.6 f) (* 1.6 (* f f))) 1.0))
 	      (p (* 0.5 (+ k 1.0)))
@@ -844,6 +834,88 @@
 	    (let ((f (pref lines (dtoi32 chan))))
 	      (f.res res)
 	      (f x freq)))))))
+
+;; State Variable Filter adapted from
+;; http://www.musicdsp.org/archive.php?classid=3#142 (it is possible
+;; to get all the hp, lp, bp and notch output values in one function,
+;; however they are currently provided in separate functions)
+
+(if (not (llvm:get-globalvar "SVF_LOWPASS"))
+    (bind-val SVF_LOWPASS i64 1))
+(if (not (llvm:get-globalvar "SVF_HIGHPASS"))
+    (bind-val SVF_HIGHPASS i64 2))
+(if (not (llvm:get-globalvar "SVF_BANDPASS"))
+    (bind-val SVF_BANDPASS i64 3))
+(if (not (llvm:get-globalvar "SVF_NOTCH"))
+    (bind-val SVF_NOTCH i64 4))
+(if (not (llvm:get-globalvar "SVF_PEAK"))
+    (bind-val SVF_PEAK i64 5))
+
+(bind-func min2d
+  (lambda (a:double b)
+    (if (< a b) a b)))
+
+(bind-func svf_c
+  "Returns a (state variable) filter closure"
+  (lambda (type)
+    ;; old values
+    (let ((cutoff_ 0.0)
+          (resonance_ 0.0)
+          (drive 0.0)
+          (freq 0.0)
+          (damp 0.0)
+          (notch 0.0)
+          (low 0.0)
+          (high 0.0)
+          (band 0.0)
+          (peak 0.0)
+          (out 0.0))
+      (lambda (in cutoff resonance)
+        ;; recalculate some values if cutoff or resonance have changed
+        (if (or (<> cutoff cutoff_)
+                (<> resonance resonance_))
+            (begin
+              (set! cutoff_ cutoff)
+              (set! resonance_ resonance)
+              (set! freq (* 2.0 (sin (* PI (min2d 0.25 (/ cutoff (* SAMPLERATE 2.0)))))))
+              (set! damp (min2d (* 2.0 (- 1.0 (pow resonance 0.25)))
+                                (min2d 2.0 (- (/ 2.0 freq) (* freq 0.5)))))))
+        (set! notch (- in (* damp band)))
+        (set! low (+ low (* freq band)))
+        (set! high (- notch low))
+        (set! band (- (+ (* freq high) band)
+                      (* drive band band band)))
+        ;; this is a bit filthy - needs a macro
+        (set! out (* 0.5 (if (= type SVF_LOWPASS)
+                             low
+                             (if (= type SVF_HIGHPASS)
+                                 high
+                                 (if (= type SVF_BANDPASS)
+                                     band
+                                     (if (= type SVF_NOTCH)
+                                         notch
+                                         (if (= type SVF_PEAK)
+                                             peak
+                                             0.0)))))))
+        ;; now do it all again (because it's oversampled for
+        ;; stability)
+        (set! notch (- in (* damp band)))
+        (set! low (+ low (* freq band)))
+        (set! high (- notch low))
+        (set! band (- (+ (* freq high) band)
+                      (* drive band band band)))
+        ;; this is a bit filthy - needs a macro
+        (set! out (+ out (* 0.5 (if (= type SVF_LOWPASS)
+                                    low
+                                    (if (= type SVF_HIGHPASS)
+                                        high
+                                        (if (= type SVF_BANDPASS)
+                                            band
+                                            (if (= type SVF_NOTCH)
+                                                notch
+                                                (if (= type SVF_PEAK)
+                                                    peak
+                                                    0.0))))))))))))
 
 ;; based on Steve Harris's foverdrive lv2 plugin
 ;; http://plugin.org.uk/
@@ -944,13 +1016,13 @@
 
 ;; make a convenience wrapper for asr
 (bind-func adsr_c
-  (lambda (start_time atk_dur dky_dur sus_dur rel_dur peek_amp sus_amp)
+  (lambda (start_time atk_dur dky_dur sus_dur rel_dur peak_amp sus_amp)
     (let* ((points 6)
 	   (data:double* (zalloc (* points 2))))
       (pset! data 0 start_time)
       (pset! data 1 0.0)
       (pset! data 2 (+ start_time atk_dur)) ;; point data
-      (pset! data 3 peek_amp)
+      (pset! data 3 peak_amp)
       (pset! data 4 (+ start_time atk_dur dky_dur))
       (pset! data 5 sus_amp)
       (pset! data 6 (+ start_time atk_dur dky_dur sus_dur))
@@ -966,14 +1038,14 @@
 
 ;; an accumulative adsr (random access not allowed! time must be linear).
 (bind-func adsr_accum_c
-  (lambda (start_time:double atk_dur dky_dur sus_dur rel_dur peek_amp sus_amp)
-    (let ((val (if (> (+ atk_dur dky_dur) 1.0) 0.0 peek_amp))
+  (lambda (start_time:double atk_dur dky_dur sus_dur rel_dur peak_amp sus_amp)
+    (let ((val (if (> (+ atk_dur dky_dur) 1.0) 0.0 peak_amp))
 	  (t1 atk_dur)
 	  (t2 (+ atk_dur dky_dur))
 	  (t3 (+ atk_dur dky_dur sus_dur))
 	  (t4 (+ atk_dur dky_dur sus_dur rel_dur))	  
-	  (inc1 (/ peek_amp atk_dur))
-	  (inc2 (* -1.0 (/ (- peek_amp sus_amp) dky_dur)))
+	  (inc1 (/ peak_amp atk_dur))
+	  (inc2 (* -1.0 (/ (- peak_amp sus_amp) dky_dur)))
 	  (inc3 (* -1.0 (/ sus_amp rel_dur))))
       (lambda (time:double chan)
 	(if (< chan 1.0)
@@ -993,6 +1065,17 @@
 	  (a (+ w v (* (- x2 x0) 0.5)))
 	  (b (+ w a)))
       (+ (* (+ (* (- (* a fractional) b) fractional) c) fractional) x0))))
+
+;; linear fade closure
+
+(bind-func fade_c
+  (lambda (phase)
+    (lambda (amp freq)
+      (let ((inc (/ freq SAMPLERATE)))
+	(if (> phase 1.0)
+            amp
+            (begin (set! phase (+ phase inc))
+                   (* phase amp)))))))
 
 ;;  midi/freq utilities
 

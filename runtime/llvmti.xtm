@@ -85,6 +85,10 @@
 	   (list* (car ftype) (cddr ftype)))
 	 (llvm:get-function-args name))))
 
+(define llvm:get-function-args-withoutzone
+   (lambda (name)
+     (llvm:get-function-args name)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; strips pretty-types from source code 
 ;; returns a cons of (the-new-ast any-explicit-types)
@@ -1927,7 +1931,6 @@
       ;(println 'native-check 'ast: ast 'vars: vars 'request: request?)
       (let ((ftype (map impc:ir:get-type-from-str
                         (llvm:get-function-args-withoutzone (symbol->string (car ast))))))
-	 ;(println 'ftype:> 'ast: ast 'type: ftype)
          (if *impc:ti:print-sub-checks* (println 'ftype:> 'ast: ast 'type: ftype))
 
          (if (<> (length ftype) 
@@ -1946,6 +1949,36 @@
                    (cdr ast)
                    (cdr ftype))
          (list (car ftype)))))
+
+
+;; with _native functions
+(define impc:ti:nativef-check
+  (lambda (ast vars kts request?)
+    ;; (println 'type-checking: (car ast))
+                                        ;(println 'native-check 'ast: ast 'vars: vars 'request: request?)
+    (let* ((isclosure (if (llvm:get-function (string-append (symbol->string (car ast)) "_getter")) #t #f))
+           (name (symbol->string (car ast)))
+           (ftype (map impc:ir:get-type-from-str
+                       (llvm:get-function-args-withoutzone name))))
+      ;;(println 'ftype:> 'ast: ast 'type: ftype)
+      (if *impc:ti:print-sub-checks* (println 'ftype:> 'ast: ast 'type: ftype))
+
+      (if (<> (length ftype) 
+              (length ast))
+          (print-error 'Compiler 'Error: 'bad 'arity 'in 'call ast))
+
+      ;; we don't care what we get back because we already know the return type
+      (for-each (lambda (a t)
+                  ;; if a is a symbol then add type t to a
+                  ;; we also know that for native functions there 
+                  ;; is no choice about the type so we should
+                  ;; force it to the type not update it
+                                        ;(if (symbol? a) (impc:ti:force-var a vars kts t))
+                  (if (symbol? a) (impc:ti:update-var a vars kts t))
+                  (impc:ti:type-check a vars kts t))
+                (cdr ast)
+                (cdr ftype))
+      (list (car ftype)))))
 
 
 
@@ -3991,7 +4024,10 @@
 		   	 (impc:ti:run pfunc code (cons pfunc (string->symbol type)))
 			 (impc:ir:add-poly polyname pfunc type)			 
 			 (let ((setter (llvm:get-function (string-append (symbol->string pfunc) "_setter"))))
-			   (llvm:run setter (sys:create-mzone *impc:default-zone-size*)))
+                           (sys:push-memzone (sys:create-mzone *impc:default-zone-size*))
+			   (llvm:run setter (sys:peek-memzone)) ;; (sys:create-mzone *impc:default-zone-size*))
+                           (sys:pop-memzone) ;; don't destroy - this happens in _setter func
+                           )
 			 (cons pfunc
 			       (map (lambda (jj)
 				      (impc:ti:add-types-to-source symname jj types envvars ast))
@@ -4492,9 +4528,9 @@
          ;; now compile ir to x86 and make stub code
          (let* ((closure-type (cadr (impc:ir:gname)))
 		(closure-type-- (impc:ir:get-type-str (impc:ir:pointer-- (impc:ir:get-type-from-str closure-type))))
-                (compile-stub? (if (llvm:get-globalvar (string-append (symbol->string symname) "_var")) #f #t))
+                (compile-stub? (if (llvm:get-function (string-append (symbol->string symname) "_getter")) #f #t))
                 (fs (string-append "define ccc " closure-type " @" (string-append (symbol->string symname) "_maker")
-                                   "(i8* %_impz){\nentry:\n"				   
+                                   "(i8* %_impz) nounwind {\nentry:\n"				   
                                    ;; "%_zone = bitcast i8* %_impz to %mzone*\n"
 				   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 				   ;; ;; new lines for impz
@@ -4502,12 +4538,12 @@
 				   "store i8* %_impz, i8** %_impzPtr\n"
 				   ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
                                    fstr "}\n"))
-                (fssetter (string-append (if (llvm:get-globalvar (string-append (symbol->string symname) "_var"))
-                                             "" ;; if global var alread exists do nothing
+                (fssetter (string-append (if compile-stub? ;;(llvm:get-globalvar (string-append (symbol->string symname) "_var"))
                                              (string-append "@" (symbol->string symname) "_var = global [1 x i8*] [ i8* null ]\n\n"
-                                                            "@" (symbol->string symname) "_var_zone = global [1 x i8*] [ i8* null ]\n\n"))
+                                                            "@" (symbol->string symname) "_var_zone = global [1 x i8*] [ i8* null ]\n\n")
+                                             "") ;; if global var alread exists do nothing
                                          "define ccc void @" (string-append (symbol->string symname) "_setter")
-                                         "(i8* %_impz){\nentry:\n" 
+                                         "(i8* %_impz) nounwind {\nentry:\n" 
                                          "%oldzone1 = getelementptr [1 x i8*]* @" (symbol->string symname) "_var_zone, i32 0, i32 0\n"
                                          "%oldzone2 = load i8** %oldzone1\n"
                                          "%oldzone3 = bitcast i8* %oldzone2 to %mzone*\n"
@@ -4526,9 +4562,8 @@
 					 "then:\ncall ccc void @llvm_destroy_zone_after_delay(%mzone* %oldzone3, i64 441000)\nbr label %cont\n"
                                          "cont:\n"
                                          "ret void\n}\n"))
-                ;(stub-type (string->sexpr (impc:ti:string-to-type closure-type)))
                 (stub-type (impc:ir:get-closure-type-from-str closure-type))
-                (fsgetter (string-append "define ccc i8* @" (symbol->string symname) "_getter(){\n"
+                (fsgetter (string-append "define ccc i8* @" (symbol->string symname) "_getter() nounwind {\n"
                                          "entry:\n"
                                          "%ptr = getelementptr [1 x i8*]* @" (symbol->string symname) "_var, i32 0, i32 0\n"
                                          "%func = load i8** %ptr\n"
@@ -4543,41 +4578,7 @@
 							     (string-append ", " (impc:ir:get-type-str a)))
 							   (cddr stub-type)))
 					       "}*")))
-                (fstub (string-append "define ccc " (impc:ir:get-type-str (car stub-type))
-                                      " @" (string-append (symbol->string symname) "(i8* %_impz")
-                                      (apply string-append (map (lambda (t n c)
-                                                                   (string-append c (impc:ir:get-type-str t) " "
-                                                                                  n))
-                                                                (cdr stub-type)                                           
-                                                                '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")
-                                                                '("," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," ",")))
-                                      ")\n"
-                                      "{\nentry:\n"
-                                      ;"%_zone = call ccc %mzone* @malloc_create_zone(0,0)\n"
-                                      ;"%_zone = call ccc %mzone* @malloc_default_zone()\n"
-                                      ;"%_impz = bitcast %mzone* %_zone to i8*\n"
-                                      "%ptr = getelementptr [1 x i8*]* @" (symbol->string symname) "_var, i32 0, i32 0\n"
-                                      "%ptrvar = load i8** %ptr\n"
-                                      "%closure_tmp = bitcast i8* %ptrvar to " closure-type "\n"				      
-                                      "%closure = load " closure-type " %closure_tmp \n"
-                                      "%fPtr = getelementptr " closure-type-- " %closure, i32 0, i32 2\n"
-                                      "%ePtr = getelementptr " closure-type-- " %closure, i32 0, i32 1\n"
-                                      "%ff = load "
-                                      (regex:replace closure-type-- "<\\{ ?i8\\*, ?i8\\*,(.*)\\}>\\*" "$1")
-                                      "* %fPtr\n"
-                                      "%ee = load i8** %ePtr\n"
-                                      (if (impc:ir:void? (car stub-type)) "" "%result = ")
-                                      "tail call fastcc " (impc:ir:get-type-str (car stub-type)) " %ff(i8* %_impz, i8* %ee"
-                                      (apply string-append (map (lambda (t n)
-                                                                   (string-append ", " 
-                                                                                  (impc:ir:get-type-str t) 
-                                                                                  " " n))
-                                                                (cdr stub-type)
-								'("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")))
-                                      ")\nret " (impc:ir:get-type-str (car stub-type)) 
-                                      (if (impc:ir:void? (car stub-type)) "\n" " %result\n")
-                                      "}\n"))
-		(fscallback (string-append "define ccc void @" (string-append (symbol->string symname) "_callback(i8* %dat){\n"
+		(fscallback (string-append "define ccc void @" (string-append (symbol->string symname) "_callback(i8* %dat) nounwind {\n"
 					   "entry:\n"
 					   (if (null? cb-struct-type)
 					       "%fstruct = select i1 true, i8* %dat, i8* %dat\n"
@@ -4604,21 +4605,19 @@
 					   "%ee = load i8** %ePtr\n"
 					   (if (impc:ir:void? (car stub-type)) "" "%result = ")
 					   "tail call fastcc " (impc:ir:get-type-str (car stub-type)) " %ff(i8* %_impz, i8* %ee"
+					   ;;"call ccc " (impc:ir:get-type-str (car stub-type)) " %ff(i8* %_impz, i8* %ee"                                           
 					   (apply string-append (map (lambda (t n)
 								       (string-append ", " 
 										      (impc:ir:get-type-str t) 
 										      " " n))
 								     (cdr stub-type)
 								     '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")))
-					   ")\nret void\n" ; (impc:ir:get-type-str (car stub-type)) 
-					   ;(if (impc:ir:void? (car stub-type)) "\n" " %result\n")
+					   ")\nret void\n" 
 					   "}\n")))
-		(fstub_scheme_valid #t) ;; this will be set to false if no valid conversion type to scheme is available (structs and arrays are not supported yet for example)
+		(fstub_scheme_valid #t) 
                 (fstub_scheme (string-append "define ccc i8* " ;(impc:ir:get-type-str (car stub-type))
-					     " @" (string-append (symbol->string symname) "_scheme(i8* %_sc, i8* %args)\n"
+					     " @" (string-append (symbol->string symname) "_scheme(i8* %_sc, i8* %args) nounwind\n"
 					     "{\nentry:\n"
-					     ;"%_zone = call ccc %mzone* @llvm_zone_create(i64 2048)\n"
-					     ;"%_zone = call ccc %mzone* @malloc_default_zone()\n"
 					     "%_zone = call ccc %mzone* @llvm_peek_zone_stack()\n"
 					     "%_impz = bitcast %mzone* %_zone to i8*\n"
 
@@ -4680,7 +4679,6 @@
 
 					     ;(begin (println 'bbbbb) "")					     
 					     
-					     ;"call ccc void @llvm_destroy_zone_after_delay(i8* %_impz, double 88200.0)\n"
 					     "%ptr = getelementptr [1 x i8*]* @" (symbol->string symname) "_var, i32 0, i32 0\n"
 					     "%ptrvar = load i8** %ptr\n"
 					     "%closure_tmp = bitcast i8* %ptrvar to " closure-type "\n"
@@ -4727,43 +4725,72 @@
 					     
 					     "ret i8* %res\n"
 					     "}")))
-		;;(fffffffff (println fstub_scheme))
+                (fstub (string-append "define fastcc " (impc:ir:get-type-str (car stub-type))
+                                      " @" (string-append (symbol->string symname) "("
+                                                          (apply string-append (map (lambda (t n c)
+                                                                                      (string-append c (impc:ir:get-type-str t) " "
+                                                                                                     n))
+                                                                                    (cdr stub-type)                                
+                                                                                    '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")
+                                                                                    '("" "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," ",")))
+                                                          ") nounwind \n"
+                                                          "{\nentry:\n"
+                                                          "%_zone = call ccc %mzone* @llvm_peek_zone_stack()\n"
+                                                          "%_impz = bitcast %mzone* %_zone to i8*\n"
+                                                          "%ptr = getelementptr [1 x i8*]* @" (symbol->string symname) "_var, i32 0, i32 0\n"
+                                                          "%ptrvar = load i8** %ptr\n"
+                                                          "%closure_tmp = bitcast i8* %ptrvar to " closure-type "\n"
+                                                          "%closure = load " closure-type " %closure_tmp \n"
+                                                          "%fPtr = getelementptr " closure-type-- " %closure, i32 0, i32 2\n"
+                                                          "%ePtr = getelementptr " closure-type-- " %closure, i32 0, i32 1\n"
+                                                          "%ff = load "
+                                                          (regex:replace closure-type-- "<\\{ ?i8\\*, ?i8\\*,(.*)\\}>\\*" "$1")
+                                                          "* %fPtr\n"
+                                                          "%ee = load i8** %ePtr\n"
+                                                          (if (impc:ir:void? (car stub-type)) "" "%result = ")
+                                                          "tail call fastcc " (impc:ir:get-type-str (car stub-type)) " %ff(i8* %_impz, i8* %ee"
+                                                          (apply string-append (map (lambda (t n)
+                                                                                      (string-append ", " 
+                                                                                                     (impc:ir:get-type-str t) 
+                                                                                                     " " n))
+                                                                                    (cdr stub-type)
+                                                                                    '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")))
+                                                          ")\nret " (impc:ir:get-type-str (car stub-type)) 
+                                                          (if (impc:ir:void? (car stub-type)) "\n" " %result\n")
+                                                          "}")))
                 (fstub_native (string-append "define ccc " (impc:ir:get-type-str (car stub-type))
-					     " @" (string-append (symbol->string symname) "_native("
-								 (apply string-append (map (lambda (t n c)
-											     (string-append c (impc:ir:get-type-str t) " "
+                                             " @" (string-append (symbol->string symname) "_native("
+                                                                 (apply string-append (map (lambda (t n c)
+                                                                                             (string-append c (impc:ir:get-type-str t) " "
 													    n))
 											   (cdr stub-type)                                
 											   '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")
 											   '("" "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," "," ",")))
-					     ")\n"
-					     "{\nentry:\n"
-					     ;"%_zone = call ccc %mzone* @llvm_zone_create(i64 2048)\n"
-					     ;"%_zone = call ccc %mzone* @malloc_default_zone()\n"
-					     "%_zone = call ccc %mzone* @llvm_peek_zone_stack()\n"
-					     "%_impz = bitcast %mzone* %_zone to i8*\n"
-					     ;"call ccc void @llvm_destroy_zone_after_delay(i8* %_impz, double 88200.0)\n"
-					     "%ptr = getelementptr [1 x i8*]* @" (symbol->string symname) "_var, i32 0, i32 0\n"
-					     "%ptrvar = load i8** %ptr\n"
-					     "%closure_tmp = bitcast i8* %ptrvar to " closure-type "\n"
-					     "%closure = load " closure-type " %closure_tmp \n"
-					     "%fPtr = getelementptr " closure-type-- " %closure, i32 0, i32 2\n"
-					     "%ePtr = getelementptr " closure-type-- " %closure, i32 0, i32 1\n"
-					     "%ff = load "
-					     (regex:replace closure-type-- "<\\{ ?i8\\*, ?i8\\*,(.*)\\}>\\*" "$1")
-					     "* %fPtr\n"
-					     "%ee = load i8** %ePtr\n"
-					     (if (impc:ir:void? (car stub-type)) "" "%result = ")
-					     "tail call fastcc " (impc:ir:get-type-str (car stub-type)) " %ff(i8* %_impz, i8* %ee"
-					     (apply string-append (map (lambda (t n)
-									 (string-append ", " 
-											(impc:ir:get-type-str t) 
-											" " n))
-								       (cdr stub-type)
-								       '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")))
-					     ")\nret " (impc:ir:get-type-str (car stub-type)) 
-					     (if (impc:ir:void? (car stub-type)) "\n" " %result\n")
-					     "}"))))
+                                                                 ") nounwind \n"
+                                                                 "{\nentry:\n"
+                                                                 "%_zone = call ccc %mzone* @llvm_peek_zone_stack()\n"
+                                                                 "%_impz = bitcast %mzone* %_zone to i8*\n"
+                                                                 "%ptr = getelementptr [1 x i8*]* @" (symbol->string symname) "_var, i32 0, i32 0\n"
+                                                                 "%ptrvar = load i8** %ptr\n"
+                                                                 "%closure_tmp = bitcast i8* %ptrvar to " closure-type "\n"
+                                                                 "%closure = load " closure-type " %closure_tmp \n"
+                                                                 "%fPtr = getelementptr " closure-type-- " %closure, i32 0, i32 2\n"
+                                                                 "%ePtr = getelementptr " closure-type-- " %closure, i32 0, i32 1\n"
+                                                                 "%ff = load "
+                                                                 (regex:replace closure-type-- "<\\{ ?i8\\*, ?i8\\*,(.*)\\}>\\*" "$1")
+                                                                 "* %fPtr\n"
+                                                                 "%ee = load i8** %ePtr\n"
+                                                                 (if (impc:ir:void? (car stub-type)) "" "%result = ")
+                                                                 "tail call fastcc " (impc:ir:get-type-str (car stub-type)) " %ff(i8* %_impz, i8* %ee"                                                                 
+                                                                 (apply string-append (map (lambda (t n)
+                                                                                             (string-append ", " 
+                                                                                                            (impc:ir:get-type-str t) 
+                                                                                                            " " n))
+                                                                                           (cdr stub-type)
+                                                                                           '("%a" "%b" "%c" "%d" "%e" "%f" "%g" "%h" "%i" "%j" "%k" "%l" "%m" "%n" "%o" "%p" "%q" "%r" "%s" "%t")))
+                                                                 ")\nret " (impc:ir:get-type-str (car stub-type)) 
+                                                                 (if (impc:ir:void? (car stub-type)) "\n" " %result\n")
+                                                                 "}"))))
 
 	   ;;(println fsgetter)
 	   ;;(println fstub)
@@ -4782,51 +4809,44 @@
             (if *impc:compiler:print-raw-llvm* (print-full-nq fssetter))
 	    (if *impc:compiler:precomp-llvm* (emit "(llvm:compile \"" fssetter "\")\n\n" *impc:compiler:precomp*))
             (if *impc:compile*
-                (begin ;(llvm:remove-function (string-append (symbol->string symname) "_setter"))
-                       ;(llvm:remove-globalvar (string-append (symbol->string symname) "_var"))
-                       (if (not (llvm:compile fssetter))
+                (begin (if (not (llvm:compile fssetter))
                            (begin (print-error "Compiler Failed")
                                   (error "")))
                        (if *impc:compiler:print* (print-notification "compiled setter"))))
-            ;(if *impc:compile*
-            ;    (let ((res1 (llvm:get-function (string-append (symbol->string symname) "_setter"))))                   
-            ;       (if (cptr? res1)
-            ;           (llvm:run res1 (sys:create-mzone))
-            ;           (begin (print-error 'Compiler 'Error '- 'error 'creating 'setter 'function)
-            ;                  (error "")))))
             (if *impc:compiler:print* (println '--------------------------------compiling 'getter----------------------------------->))            
             (if *impc:compiler:print* (println fsgetter))            
             (if *impc:compiler:print-raw-llvm* (print-full-nq fsgetter))
 	    (if *impc:compiler:precomp-llvm* (emit "(llvm:compile \"" fsgetter "\")\n\n" *impc:compiler:precomp*))
             (if (and *impc:compile* compile-stub?) ;; only compile stub first time around!!!
-                (begin ;(llvm:remove-function (string-append (symbol->string symname) "_stub"))
-                       (if (not (llvm:compile fsgetter))
+                (begin (if (not (llvm:compile fsgetter))
                            (begin (print-error "Compiler Failed")
                                   (error ""))) 
                        (if *impc:compiler:print* (print-notification "compiled stub"))))
             (if *impc:compiler:print* (println '--------------------------------compiling 'stubs----------------------------------->))            
-            (if *impc:compiler:print* (println fstub))            
+            (if *impc:compiler:print* (println fstub))
+            (if *impc:compiler:print* (println))
+            (if *impc:compiler:print* (println fstub_native))
+            (if *impc:compiler:print* (println))            
+            (if *impc:compiler:print* (println fstub_scheme))            
             (if *impc:compiler:print-raw-llvm* (print-full-nq fstub))
 	    (if *impc:compiler:precomp-llvm* (emit "(llvm:compile \"" fstub "\")\n\n" *impc:compiler:precomp*))
 	    (if *impc:compiler:precomp-llvm* (emit "(llvm:compile \"" fstub_native "\")\n\n" *impc:compiler:precomp*))
 	    (if *impc:compiler:precomp-llvm* (emit "(llvm:compile \"" fstub_scheme "\")\n\n" *impc:compiler:precomp*))	    
             (if (and *impc:compile* compile-stub?) ;; only compile stub first time around!!!
-                (begin ;(llvm:remove-function (string-append (symbol->string symname) "_stub"))
-                       (if (or (not (llvm:compile fstub))
+                (begin (if (or (not (llvm:compile fstub))
 			       (not (llvm:compile fstub_native))
 			       (not (if fstub_scheme_valid (llvm:compile fstub_scheme) #t)))
                            (begin (print-error "Compiler Failed building stubs!")
                                   (error "")))
 		       ;; bind fstub_scheme
-		       ;(add-foreign-func (symbol->string symname) (llvm:get-scheme-function (symbol->string name)))
-                       (if *impc:compiler:print*
+		       (if *impc:compiler:print*
 			   (print-notification "compiled stubs"))))
 	   (if *impc:compiler:print* (println '----------------------------compiling 'callback----------------------------------->))
 	   (if *impc:compiler:print* (println fscallback))
 	   (if *impc:compiler:print-raw-llvm* (print-full-nq fscallback))
 	   (if *impc:compiler:precomp-llvm* (emit "(llvm:compile \"" fscallback "\")\n\n" *impc:compiler:precomp*))
 	   (if (and *impc:compile* compile-stub?) ;; only compile callback first time around!!!
-	       (begin ;(llvm:remove-function (string-append (symbol->string symname) "_stub"))
+	       (begin 
 	   	 (if (not (llvm:compile fscallback))
 	   	     (begin (print-error 'Compiler 'Failed:)
 	   		    (error "")))
@@ -4852,32 +4872,9 @@
   `(let ((res (assoc (quote ,name) *impc:docstrings*))
 	 (res2 (assoc (quote ,name) *impc:closuretypes*)))
      (if res
-	 (begin
-	   (ascii-print-color 0 7 10)	   
-	   (print)
-	   (ascii-print-color 1 2 10)	   
-	   (print (quote ,name))
-	   (ascii-print-color 0 7 10)	   
-	   (print " : ")
-	   (ascii-print-color 1 3 10)
-	   (print (cdr res2) "\n")
-	   (ascii-print-color 0 7 10)
-	   (print (cdr res))
-	   ;(ascii-print-color 0 7 10)
-	   (print)
-	   (cons (cdr res) (cdr res2)))
+	 (cons (cdr res) (cdr res2))
 	 (if res2
-	     (begin
-	       (ascii-print-color 0 7 10)
-	       (print "\n")
-	       (ascii-print-color 1 2 10)	       
-	       (print (quote ,name))
-	       (ascii-print-color 0 7 10) 
-	       (print " : ")
-	       (ascii-print-color 1 3 10)
-	       (print (cdr res2) "\n")
-	       (ascii-print-color 0 7 10)
-	       (cdr res2))
+	     (cdr res2)
 	     #f))))
 
 
@@ -4916,7 +4913,11 @@ deprecated - use bind-func instead."
 				(func (llvm:get-function (symbol->string ',symname))))
 
 			   (if setter
-			       (llvm:run setter (sys:create-mzone ,zone-size))
+			       (begin
+                                 (sys:push-memzone (sys:create-mzone ,zone-size))
+                                 (llvm:run setter (sys:peek-memzone))
+                                 (sys:pop-memzone) ;; don't destroy here should happen in _setter
+                                 )
 			       (begin (print-error 'no 'compiled 'function ',symname 'setter  '... 'turn 'on 'compilation?)
 				      (error "")))
 			   (if func
@@ -4945,7 +4946,11 @@ deprecated - use bind-func instead."
 		     *impc:compiler:precomp*))
 
 	   (if setter
-	       (llvm:run setter (sys:create-mzone ,zone-size))
+	       (begin
+                 (sys:push-memzone (sys:create-mzone ,zone-size))
+                 (llvm:run setter (sys:peek-memzone))
+                 (sys:pop-memzone) ;; don't destroy here - should happen in _setter
+                 )
 	       (begin (print-error 'no 'compiled 'function ',symname 'setter  '... 'turn 'on 'compilation?)
 		      (error "")))
 	   (if func
@@ -5013,7 +5018,11 @@ deprecated - use bind-func instead."
 		 (func (llvm:get-function (symbol->string ',symname))))
 	    (println 'setter: setter 'func: func)
 	    (if setter
-		(llvm:run setter (sys:create-mzone ,zone-size))
+                (begin
+                  (sys:push-memzone (sys:create-mzone ,zone-size))
+                  (llvm:run setter (sys:peek-memzone))
+                  (sys:pop-memzone) ;; don't destroy here - should happend in _setter
+                  )
 		(begin (print-error 'no 'compiled 'function ',symname 'setter  '... 'turn 'on 'compilation?)
 		       (error "")))
 	    ;;(println 'scheme_func: (llvm:get-scheme-function ,(symbol->string symname)))
@@ -5072,32 +5081,7 @@ deprecated - use bind-func instead."
 	  (print (impc:ir:pretty-print-type ,(symbol->string symbol))) ; (llvm:get-named-type ,(symbol->string symbol))))
 	  (ascii-print-color 0 7 10)
 	  (print)))
-  
-;; (define-macro (bind-type symbol type)  
-;;   (if *impc:compiler:precomp-llvm*
-;;       (emit (sexpr->string
-;; 	     `(bind-type ,symbol ,type))
-;; 	    "\n\n"
-;; 	    *impc:compiler:precomp*))
-;;   `(begin (if (char=? (string-ref ,(symbol->string type) 0) #\<)
-;; 	      (if (regex:match? ,(symbol->string type) "!") ;; then must be poly type
-;; 		  (impc:ir:add-gpolytype ',symbol ',type)
-;; 		  (llvm:compile (string-append "%" ,(symbol->string symbol) " = type "
-;; 		  			       (impc:ir:get-type-str (impc:ir:get-type-from-pretty-str ,(symbol->string type) ,(symbol->string symbol))))))
-;; 	      (print-error 'Compiler 'Error: 'type 'must 'be 'a 'tuple 'type))
-;; 	  (ascii-print-color 0 7 10)
-;; 	  (print "Bound ")
-;; 	  (ascii-print-color 1 2 10)
-;; 	  (print ',symbol)
-;; 	  (ascii-print-color 0 7 10)
-;; 	  (print " >>> ")
-;; 	  (ascii-print-color 1 3 10)
-;; 	  ;(print ',type)
-;; 	  (if (impc:ir:gpolytype-types ',symbol)
-;; 	      (print (impc:ir:gpolytype-types ',symbol))
-;; 	      (print (impc:ir:pretty-print-type (llvm:get-named-type ,(symbol->string symbol)))))
-;; 	  (ascii-print-color 0 7 10)
-;; 	  (print)))
+
 
 (define-macro (bind-type symbol type)  
   (if *impc:compiler:precomp-llvm*
@@ -5189,7 +5173,7 @@ deprecated - use bind-func instead."
               *impc:compiler:precomp*))
     (let ((t (impc:ir:get-type-from-pretty-str (atom->string type))))
       (cond ((llvm:get-globalvar (symbol->string symbol))
-             `(print-error 'Compiler 'Error: 'symbol ',symbol 'has 'already 'been 'bound, 'cannot 'rebind))
+             `(print-notification 'Compiler 'Warning: 'symbol ',symbol 'is 'already 'bound, 'and 'has 'not 'been 're-bound))
             ((and (equal? "i8*" (symbol->string type))
                   (string? value))
              `(begin
@@ -5286,18 +5270,21 @@ deprecated - use bind-func instead."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; this here for wrapping llvm dynamic binds
-(define-macro (bind-lib library symname type)
+(define-macro (bind-lib library symname type . args)
   (if *impc:compiler:precomp-llvm*
       (emit (sexpr->string
-	     `(bind-lib ,library ,symname ,type))
+	     `(bind-lib ,library ,symname ,type ,@args))
 	    "\n\n"
 	    *impc:compiler:precomp*))
-  `(__dynamic-bind ,library ',symname ',type))
+  `(__dynamic-bind ,library ',symname ',type ,@(map (lambda (k) `(quote ,k)) args)))
 
 (define __dynamic-bind
-  (lambda (library symname type)
+  (lambda (library symname type . args)
     (let* ((ctype (cdr (impc:ir:get-type-from-pretty-str (symbol->string type))))
+           (calling_convention (if (null? args) "ccc" (symbol->string (car args))))
            (ircode (string-append "declare "
+                                  calling_convention
+                                  " "
                                    (impc:ir:get-type-str (car ctype))
                                    " @"
                                    (symbol->string symname)
@@ -5309,7 +5296,7 @@ deprecated - use bind-func instead."
                                               (map (lambda (v)
                                                      (string-append "," (impc:ir:get-type-str v)))
                                                    (cddr ctype))))
-                                   ")")))
+                                   ") nounwind")))
       (if (and (llvm:compile ircode)
 	       (llvm:bind-symbol library (symbol->string symname)))
 	  (begin (ascii-print-color 0 9 10)
@@ -5324,6 +5311,62 @@ deprecated - use bind-func instead."
 					;(print " from lib: " library)
 		 (print))
 	  (print-error 'Compiler 'Error: 'could 'not 'bind! symname)))))
+
+;;; this here for binding to CLOSURE in dylib
+;;
+;; arg is for *optional* zone size arg
+(define-macro (bind-lib-func library symname type . args)
+  `(begin
+     (bind-lib ,library ,symname ,type fastcc)     
+     (bind-lib ,library ,(string->symbol (string-append (symbol->string symname) "_setter")) [void,i8*]*)
+     (bind-lib ,library ,(string->symbol (string-append (symbol->string symname) "_getter")) [i8*]*)
+     (bind-lib ,library ,(string->symbol (string-append (symbol->string symname) "_callback")) [void,i8*]*)
+     (bind-lib ,library ,(string->symbol (string-append (symbol->string symname) "_scheme")) [i8*,i8*,i8*]*)
+     (bind-lib ,library ,(string->symbol (string-append (symbol->string symname) "_native")) ,type)
+     (bind-lib ,library ,(string->symbol (string-append (symbol->string symname) "_maker"))
+               ,(string->symbol (string-append "[" (impc:ir:get-type-str (impc:ir:get-type-from-pretty-str (symbol->string type)))
+                                              ",i8*]*")))
+     (llvm:compile 
+      (string-append "@" ,(symbol->string symname) "_var = external global [1 x i8*]\n\n"
+                     "@" ,(symbol->string symname) "_var_zone = external global [1 x i8*]\n\n"))
+     (llvm:bind-symbol ,library ,(string-append (symbol->string symname) "_var"))
+     (llvm:bind-symbol ,library ,(string-append (symbol->string symname) "_var_zone"))
+     ;; bind scheme function
+     ;;(println (llvm:get-scheme-function ,(symbol->string symname)))
+     (if (llvm:get-scheme-function ,(symbol->string symname))
+         (begin
+           (eval (define ,symname
+                   (mk-ff (llvm:get-scheme-function ,(symbol->string symname))))
+                 (interaction-environment))))
+     ;; setup closure
+     (let ((setter (llvm:get-function ,(string-append (symbol->string symname) "_setter"))))
+       (sys:push-memzone (sys:create-mzone ,(if (null? args) *impc:default-zone-size* (car args))))
+       (llvm:run setter (sys:peek-memzone))
+       (sys:pop-memzone) ;; don't destroy zone here - should happen next timer around _setter
+       )))
+
+
+;;; this here for binding to CLOSURE in dylib
+(define-macro (bind-lib-val library symname type)
+  `(begin
+     (llvm:compile 
+      (string-append "@" ,(symbol->string symname) " = external global " ,(symbol->string type)))
+     (llvm:bind-symbol ,library ,(string-append (symbol->string symname)))))
+
+
+;; THIS IS A HELPER FUNCTION
+;;
+;; returns a (bind-lib-xtm) form for the named function
+;; by using the xtm-closure-doc to get the type
+;; function must already have been compiled into module
+(define-macro (bind-lib-xtm-get-string name)
+  (let ((res (eval `(xtm-closure-doc ,name))))
+    (if (string? res)
+        `(sexpr->string '(bind-lib-xtm mathlib ,name ,(string->symbol res)))
+        `(sexpr->string '(bind-lib-xtm mathlib ,name ,(string->symbol (cdr res)))))))
+
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

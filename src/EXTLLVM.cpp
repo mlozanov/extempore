@@ -78,10 +78,10 @@
 #include "llvm/DerivedTypes.h"
 #include "llvm/Instructions.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/DataLayout.h"
 
 //#include "llvm/ModuleProvider.h"
 
-#include "llvm/ExecutionEngine/JIT.h"
 // #include "llvm/ExecutionEngine/Interpreter.h"
 // #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/Target/TargetOptions.h"
@@ -89,11 +89,12 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/SourceMgr.h"
 // #include "llvm/Analysis/Verifier.h"
-#include "llvm/Target/TargetData.h"
+// #include "llvm/Target/TargetData.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/PassManager.h"
 
 #include "llvm/ExecutionEngine/JIT.h"
+#include "llvm/ExecutionEngine/MCJIT.h"
 #include "llvm/ExecutionEngine/Interpreter.h"
 #include "llvm/ExecutionEngine/GenericValue.h"
 
@@ -1070,32 +1071,50 @@ namespace extemp {
 	
     void EXTLLVM::initLLVM()
     {
-	if(M == 0) { // Initalize Once Only (not per scheme process)			
-	    //llvm::llvm_start_multithreaded();
-	    bool result = llvm::InitializeNativeTarget();			
-	    M = new llvm::Module("JIT",llvm::getGlobalContext());
-	    // Create the JIT.
-	    std::string ErrStr;
-	    EE = llvm::EngineBuilder(M).setErrorStr(&ErrStr).create();
-	    if (!EE) {
-		fprintf(stderr, "Could not create ExecutionEngine: %s\n", ErrStr.c_str());
-		exit(1);
-	    }
-	    EE->DisableLazyCompilation(true);
-	    //std::cout << "Lazy Compilation: OFF" << std::endl;
+	if(M == 0) { // Initalize Once Only (not per scheme process)
+                     // 
+
+          llvm::TargetOptions Opts;
+          Opts.GuaranteedTailCallOpt = true;
+          Opts.JITEmitDebugInfo = true;
+  
+          llvm::InitializeNativeTarget();
+          llvm::InitializeNativeTargetAsmPrinter();
+          llvm::LLVMContext &context = llvm::getGlobalContext();
+          //llvm::IRBuilder<> theBuilder(context);
+  
+          // Make the module, which holds all the code.
+          M = new llvm::Module("xtmjit", context);
+  
+          // Build engine with JIT
+          llvm::EngineBuilder factory(M);
+          factory.setEngineKind(llvm::EngineKind::JIT);
+          factory.setAllocateGVsWithCode(false);
+          factory.setTargetOptions(Opts);
+          factory.setUseMCJIT(false);
+          factory.setOptLevel(llvm::CodeGenOpt::Aggressive); // llvm::CodeGenOpt::None
+
+          EE = factory.create();
+          EE->DisableLazyCompilation(true);
+
+	    // //llvm::llvm_start_multithreaded();
+	    // bool result = llvm::InitializeNativeTarget();			
+	    // M = new llvm::Module("JIT",llvm::getGlobalContext());
+	    // // Create the JIT.
+	    // std::string ErrStr;
+	    // EE = llvm::EngineBuilder(M).setErrorStr(&ErrStr).setTargetOptions(llvm::TargetOptions::|).setUseMCJIT(true).create();
+	    // if (!EE) {
+	    //     fprintf(stderr, "Could not create ExecutionEngine: %s\n", ErrStr.c_str());
+	    //     exit(1);
+	    // }
+	    // EE->DisableLazyCompilation(true);
+	    // //std::cout << "Lazy Compilation: OFF" << std::endl;
 
 			
 	    //EE = llvm::EngineBuilder(M).create();
 	    PM = new llvm::PassManager();
-	    PM->add(new llvm::TargetData(*EE->getTargetData()));
-
-            // // PM->add(llvm::createProfileVerifierPass());
-            // // promote allocs to register 
-            // PM->add(llvm::createPromoteMemoryToRegisterPass());
-	    // // Do simple "peephole" optimizations and bit-twiddling optzns.
-	    // PM->add(llvm::createInstructionCombiningPass());
-	    // // Simplify the control flow graph (deleting unreachable blocks, etc).
-	    // PM->add(llvm::createCFGSimplificationPass());
+	    //PM->add(new llvm::TargetData(*EE->getTargetData()));
+            PM->add(new llvm::DataLayout(*(EE->getDataLayout())));
 
             // promote allocs to register
             PM->add(llvm::createPromoteMemoryToRegisterPass());
@@ -1114,9 +1133,8 @@ namespace extemp {
 	    // Simplify the control flow graph (deleting unreachable blocks, etc).
 	    PM->add(llvm::createCFGSimplificationPass());
 
-			
 	    //llvm::PerformTailCallOpt = true;
-	    llvm::GuaranteedTailCallOpt = true;
+	    //llvm::GuaranteedTailCallOpt = true;
 	    //llvm::llvm_start_multithreaded();
 			
 	    char fname[] = "/code.ir";

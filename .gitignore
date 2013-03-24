@@ -2,13 +2,11 @@ extempore
 extempore.exe
 config/llvm.bash
 /TAGS
-Horde3D/
 Horde3D_Log.html
-
-libs/libSOIL.so.1
-/.dir-locals.el
+.dir-locals.el
 # ignore VS build results
 msvc/
 !msvc/extempore.sln
 !msvc/extempore.vcxproj
 !msvc/ms_build_vars.bat
+extempore.pdb

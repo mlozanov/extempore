@@ -48,8 +48,8 @@
              ido-ubiquitous
              magit
              org))
-  (when (not (package-installed-p p))
-    (package-install p)))
+  (if (not (package-installed-p p))
+      (package-install p)))
 
 ;; (package-initialize)
 
@@ -73,9 +73,6 @@
 (setq visible-bell t
       inhibit-startup-message t
       color-theme-is-global t
-      sentence-end-double-space nil
-      shift-select-mode nil
-      mouse-yank-at-point t
       uniquify-buffer-name-style 'forward
       whitespace-style '(face trailing lines-tail tabs)
       whitespace-line-column 80
@@ -87,7 +84,7 @@
 (add-to-list 'safe-local-variable-values '(lexical-binding . t))
 (add-to-list 'safe-local-variable-values '(whitespace-line-column . 80))
 
-;; Set this to whatever browser you use
+;; TODO Set this to whatever browser you use
 ;; (setq browse-url-browser-function 'browse-url-firefox)
 ;; (setq browse-url-browser-function 'browse-default-macosx-browser)
 ;; (setq browse-url-browser-function 'browse-default-windows-browser)
@@ -127,6 +124,11 @@
 ;; appearance ;;
 ;;;;;;;;;;;;;;;;
 
+;; change this to whichever theme you like
+;; use 'M-x load theme' to select a theme
+(load-theme 'wombat t)
+(add-to-list 'default-frame-alist '(background-mode . dark))
+
 (dolist (mode '(menu-bar-mode tool-bar-mode scroll-bar-mode))
   (when (fboundp mode) (funcall mode -1)))
 
@@ -163,7 +165,7 @@
 ;; extempore ;;
 ;;;;;;;;;;;;;;;
 
-;; change this to wherever you put the extempore source directory
+;; TODO change this to wherever you put the extempore source directory
 (setq extempore-path "/path/to/extempore")
 
 (autoload 'extempore-mode (concat extempore-path "/extras/extempore.el") "" t)
