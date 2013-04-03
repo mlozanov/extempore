@@ -149,23 +149,22 @@
 
 ;; saw oscillator
 (bind-func saw_c
-  (lambda ()
-    (let ((p 0.0)
-	  (dp 1.0)
+  (lambda (phase)
+    (let ((dp 1.0)
 	  (x 0.0)
 	  (leak 0.995)
 	  (saw 0.0))
       (lambda (amp freq)
 	(let* ((qmax (* 0.5 (/ SAMPLERATE freq)))
 	       (dc (/ -0.498 qmax)))
-	  (set! p (+ p dp))
-	  (if (< p 0.0) 
-	      (begin (set! p (- 0.0 p))
+	  (set! phase (+ phase dp))
+	  (if (< phase 0.0) 
+	      (begin (set! phase (- 0.0 phase))
 		     (set! dp (- 0.0 dp)))
-	      (if (> p qmax)
-		  (begin (set! p (+ qmax (- qmax p)))
+	      (if (> phase qmax)
+		  (begin (set! phase (+ qmax (- qmax phase)))
 			 (set! dp (- 0.0 dp)))))
-	  (set! x (* PI p))
+	  (set! x (* PI phase))
 	  (if (< x 0.000001) (set! x 0.00001))
 	  (set! saw (* leak (+ saw (+ dc (/ (sin x) x)))))
 	  (* amp saw))))))
@@ -174,9 +173,9 @@
 ;; saw oscillator
 (if *build-multi-chan*
     (bind-func saw_mc_c
-      (lambda ()
+      (lambda (phase)
 	(let ((mem 0.0)
-	      (saw (saw_c)))
+	      (saw (saw_c phase)))
 	  (lambda (chan amp freq)
 	    (if (< chan 1.0) (set! mem (saw amp freq)))
 	    mem)))))
@@ -285,8 +284,7 @@
 (if *build-multi-chan*
     (bind-func comb_mc_c
       (lambda (channels:i64 max_delay)
-	(let ((dlines:[double,double]** (alloc channels))
-	      ;;(delay (i64tod max_delay))
+	(let ((dlines:[double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! dlines i (comb_c max_delay)))
 	  (lambda (chan x delay)
@@ -448,12 +446,12 @@
 (if *build-multi-chan*
     (bind-func reverb_mc_c
       (lambda (channels:i64 size)
-	(let ((lines:[double,double]** (alloc channels))
+	(let ((lines:[double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (reverb_c size)))
-	  (lambda (chan x)
+	  (lambda (chan x wet)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f x)))))))
+	      (f x wet)))))))
 
 
 ;; a dodgy bitcrusher
@@ -472,13 +470,43 @@
       (lambda (in)
 	(range_limit lim (* -1.0 lim) (* gain in))))))
 
-;; a four channel mixer
-(bind-func mixquad
-  (lambda (c1 c2 c3 c4 chan in:double)
-    (cond ((< chan 1.0) (* in c1))
-	  ((< chan 2.0) (* in c2))
-	  ((< chan 3.0) (* in c3))
-	  ((< chan 4.0) (* in c4))
+;; mono in (ignores anything in on channel 2)
+;; pan value [0.0-1.0]
+(bind-func pan2
+  (let ((out 0.0))
+    (lambda (x:double chan pan)
+      (if (< chan 0.5)
+          (begin (set! out x) (* (- 1.0 pan) out))
+          (* pan out)))))
+
+;; mono in (ignores all other channels)
+;; pan value [0.0-1.0]
+(if *build-multi-chan*
+    (bind-func pan_mc
+      (lambda (channels)
+        (let ((v:double 0.0)
+              (out:double 0.0))
+          (lambda (x:double chan pan)
+            (if (< chan 0.5) (set! out x))
+            (set! v (fabs (- (* (- channels 1.0) pan) chan)))
+            (if (> v 1.0) 0.0
+                (* (- 1.0 v) out)))))))
+
+
+;; simple stereo weights
+(bind-func mix2
+  (lambda (x:double chan left right)
+    (cond ((< chan 0.5) (* x left))
+          ((< chan 1.5) (* x right))
+          (else 0.0))))            
+
+;; simple quad weights
+(bind-func mix4
+  (lambda (x:double chan c1 c2 c3 c4)
+    (cond ((< chan 0.5) (* x c1))
+	  ((< chan 1.5) (* x c2))
+	  ((< chan 2.5) (* x c3))
+	  ((< chan 3.5) (* x c4))
 	  (else 0.0))))
 
 ;; a four channel mixer
@@ -548,7 +576,7 @@
 (if *build-multi-chan*
     (bind-func lpf_mc_c
       (lambda (channels:i64)
-	(let ((lines:[double,double,double]** (alloc channels))
+	(let ((lines:[double,double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (lpf_c)))
 	  (lambda (chan x freq res)
@@ -602,7 +630,7 @@
 (if *build-multi-chan*
     (bind-func hpf_mc_c
       (lambda (channels:i64)
-	(let ((lines:[double,double,double]** (alloc channels))
+	(let ((lines:[double,double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (hpf_c)))
 	  (lambda (chan x freq res)
@@ -660,7 +688,7 @@
 (if *build-multi-chan*
     (bind-func bpf_mc_c
       (lambda (channels:i64)
-	(let ((lines:[double,double,double]** (alloc channels))
+	(let ((lines:[double,double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (bpf_c)))
 	  (lambda (chan x freq bandwidth)
@@ -717,12 +745,12 @@
 (if *build-multi-chan*
     (bind-func notch_mc_c
       (lambda (channels:i64)
-	(let ((lines:[double,double,double]** (alloc channels))
+	(let ((lines:[double,double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (notch_c)))
 	  (lambda (chan x freq bandwidth)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f x freq bandwith)))))))
+	      (f x freq bandwidth)))))))
 
 ;; Hilbert transform filter
 
@@ -787,14 +815,13 @@
 (if *build-multi-chan*
     (bind-func vcf_mc_c
       (lambda (channels:i64)
-	(let ((lines:[double,double,double]** (alloc channels))
+	(let ((lines:[double,double,double,double]** (alloc channels))
 	      (res 0.5)
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! lines i (vcf_c)))
 	  (lambda (chan x freq)
 	    (let ((f (pref lines (dtoi32 chan))))
-	      (f.res res)
-	      (f x freq)))))))
+	      (f x freq res)))))))
 
 ;;
 ;; moog VCF v2.0
@@ -976,6 +1003,24 @@
     (let ((h (* time apex)))
       (* h (exp (- 1.0 h))))))
 
+(bind-func linear_c
+  (let ((time 0.0))
+    (lambda (start:double end:double dur:double)
+      (let* ((m (/ (- end start) dur))
+             (c (- end (* m dur))))
+        (lambda (inc)
+          (set! time (+ time inc))
+          (+ (* m time) c))))))
+
+(bind-func linear_mc_c
+  (let ((time 0.0))
+    (lambda (start:double end:double dur:double)
+      (let* ((m (/ (- end start) dur))
+             (c (- end (* m dur))))
+        (lambda (chan inc)
+          (if (< chan 0.5)
+              (set! time (+ time inc)))
+          (+ (* m time) c))))))
 
 (bind-func line_c
   (lambda (x1:double y1:double x2 y2)
@@ -984,7 +1029,6 @@
 		  (/ (- y2 y1) (- x2 x1))))
 	   (c (- y2 (* m x2))))
       (lambda (time) (+ (* m time) c)))))
-
 
 (bind-func envelope_segments
   (lambda (points:double* num_of_points:i64)
@@ -1067,7 +1111,6 @@
       (+ (* (+ (* (- (* a fractional) b) fractional) c) fractional) x0))))
 
 ;; linear fade closure
-
 (bind-func fade_c
   (lambda (phase)
     (lambda (amp freq)
@@ -1086,26 +1129,3 @@
 (bind-func frq2midi
   (lambda (freq)            
     (+ (* 12.0 (log2 (/ freq 440.0))) 69.0)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; An ipc helper for audio
-;;
-
-(define ipc:audio-setup
-  (lambda (proc)
-    (ipc:eval-string proc
-		     "(define-macro (play-note time inst pitch vol dur)
-			 `(let ((duration (* 1.0 ,dur))
-				(native (llvm:get-native-closure ,(symbol->string inst))))
-			    (if (cptr? native)
-				(_play_note (integer->real ,time)
-					     native
-					     (midi2frq (* 1.0 ,pitch))
-					     (/ (exp (/ ,vol 26.222)) 127.0)
-					     duration)
-				(print-error 'No 'inst 'named ,(symbol->string inst)))))")
-    (ipc:bind-func proc '_play_note)
-    (ipc:bind-func proc 'midi2frq)))
-
-;; (ipc:audio-setup "utility")
