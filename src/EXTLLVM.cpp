@@ -500,7 +500,7 @@ char* extitoa(int64_t val) {
   return buf;//&buf[i+1];        
 }
 
-static unsigned long string_hash(unsigned char* str) 
+unsigned long string_hash(unsigned char* str) 
 {
   unsigned long hash = 0;
   int c;
@@ -868,9 +868,22 @@ struct closure_address_table* new_address_table()
     return 0; // NULL for empty table
 }
  
-struct closure_address_table* add_address_table(llvm_zone_t* zone, char* name, uint32_t offset, char* type, struct closure_address_table* table)
-{	
-    struct closure_address_table* t = (struct closure_address_table*) llvm_zone_malloc(zone,sizeof(struct closure_address_table));
+struct closure_address_table* add_address_table(llvm_zone_t* zone, char* name, uint32_t offset, char* type, int alloctype, struct closure_address_table* table)
+{
+  
+    struct closure_address_table* t = NULL;
+    if(alloctype == 1) {
+      t = (struct closure_address_table*) malloc(sizeof(struct closure_address_table));
+    } else if(alloctype == 2) {
+#ifdef TARGET_OS_WINDOWS
+    t = (struct closure_address_table*) _alloca(sizeof(struct closure_address_table));
+#else
+    t = (struct closure_address_table*) alloca(sizeof(struct closure_address_table));
+#endif
+    } else {
+      t = (struct closure_address_table*) llvm_zone_malloc(zone,sizeof(struct closure_address_table));
+    }
+
     t->name = name;
     t->offset = offset;
     t->type = type;
@@ -1056,6 +1069,7 @@ namespace extemp {
     EXTLLVM EXTLLVM::SINGLETON;
     int64_t EXTLLVM::LLVM_COUNT = 0l;
     bool EXTLLVM::OPTIMIZE_COMPILES = 0;
+    bool EXTLLVM::VERIFY_COMPILES = 1;
 	
     EXTLLVM::EXTLLVM()
     {
@@ -1093,6 +1107,7 @@ namespace extemp {
           factory.setTargetOptions(Opts);
           factory.setUseMCJIT(false);
           factory.setOptLevel(llvm::CodeGenOpt::Aggressive); // llvm::CodeGenOpt::None
+          //factory.setOptLevel(llvm::CodeGenOpt::None);
 
           EE = factory.create();
           EE->DisableLazyCompilation(true);
@@ -1237,7 +1252,7 @@ namespace extemp {
 	    gv = M->getNamedValue(std::string("get_address_offset"));
 	    EE->updateGlobalMapping(gv,(void*)&get_address_offset);  
 	    gv = M->getNamedValue(std::string("add_address_table"));
-	    EE->updateGlobalMapping(gv,(void*)&add_address_table);						
+	    EE->updateGlobalMapping(gv,(void*)&add_address_table);
 	    gv = M->getNamedValue(std::string("new_address_table"));
 	    EE->updateGlobalMapping(gv,(void*)&new_address_table);						
 	    gv = M->getNamedValue(std::string("llvm_print_pointer"));
@@ -1333,6 +1348,10 @@ namespace extemp {
 	    EE->updateGlobalMapping(gv,(void*)&i32value);			    
 	    gv = M->getNamedValue(std::string("mk_i32"));
 	    EE->updateGlobalMapping(gv,(void*)&mk_i32);
+	    gv = M->getNamedValue(std::string("i16value"));
+	    EE->updateGlobalMapping(gv,(void*)&i16value);			    
+	    gv = M->getNamedValue(std::string("mk_i16"));
+	    EE->updateGlobalMapping(gv,(void*)&mk_i16);
 	    gv = M->getNamedValue(std::string("i8value"));
 	    EE->updateGlobalMapping(gv,(void*)&i8value);			    
 	    gv = M->getNamedValue(std::string("mk_i8"));

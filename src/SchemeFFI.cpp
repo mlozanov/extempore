@@ -92,6 +92,7 @@
 #include "llvm/LLVMContext.h"
 #include "llvm/CallingConv.h"
 #include "llvm/Module.h"
+#include "llvm/DataLayout.h"
 #include "llvm/Constants.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Instructions.h"
@@ -137,6 +138,199 @@
     printf(format , ## args);			\
     ascii_text_color(0,7,10)
 #endif
+
+
+#ifdef TARGET_OS_MAC
+
+  // BasicOpenGLView
+  @interface BasicOpenGLView : NSOpenGLView
+  {
+    NSMutableDictionary * stanStringAttrib;
+    int eventType;
+    float x;
+    float y;
+    int mbutton;
+    char c;
+  }
+
+  + (NSOpenGLPixelFormat*) basicPixelFormat;
+  - (id)initWithFrame:(NSRect)frameRect pixelFormat:(NSOpenGLPixelFormat *)format;
+  - (float) getX;
+  - (float) getY;
+  - (int) getMButton;
+  - (char) getC;
+  - (int) getEventType;
+  - (void) setEventType:(int)t;
+  - (void) resizeGL;  
+  - (void)keyDown:(NSEvent *)theEvent;
+  - (void) mouseDown:(NSEvent *)theEvent;
+  - (void) rightMouseDown:(NSEvent *)theEvent;
+  - (void) otherMouseDown:(NSEvent *)theEvent;
+  - (void) mouseUp:(NSEvent *)theEvent;
+  - (void) rightMouseUp:(NSEvent *)theEvent;
+  - (void) otherMouseUp:(NSEvent *)theEvent;
+  - (void) mouseDragged:(NSEvent *)theEvent;
+  - (void) scrollWheel:(NSEvent *)theEvent;
+  - (void) rightMouseDragged:(NSEvent *)theEvent;
+  - (void) otherMouseDragged:(NSEvent *)theEvent;
+  - (BOOL) acceptsFirstResponder;
+  - (BOOL) becomeFirstResponder;
+  - (BOOL) resignFirstResponder;
+@end
+
+@implementation BasicOpenGLView
+
+- (id)initWithFrame:(NSRect)frameRect pixelFormat:(NSOpenGLPixelFormat *)format
+{
+    self = [super initWithFrame: frameRect pixelFormat: format];
+    x = 0.0f;
+    y = 0.0f;
+    mbutton = 0; // 1 2 or 3 (0 for no mouse)
+    c = '0';
+    eventType = -1; // key down (1)  mouse down (2)  mouse up (3)
+                    // mouse drag (4) 
+    return self;
+}
+
+- (float) getX { return x; }
+- (float) getY { return y; }
+- (int) getMButton {return mbutton; }
+- (char) getC { return c; }
+- (int) getEventType { return eventType; }
+- (void) setEventType:(int)t { eventType = t; return; }
+
+  // STUFF FOR BasicOpenGLView
+-(void)keyDown:(NSEvent *)theEvent
+{
+    NSString *characters = [theEvent characters];
+    if ([characters length]) {
+        unichar character = [characters characterAtIndex:0];
+        eventType = 1;
+        c = (char) character;
+    }    
+    return;
+}
+ 
+- (void)mouseDown:(NSEvent *)theEvent // trackball
+{
+    if ([theEvent modifierFlags] & NSControlKeyMask) // send to pan
+        [self rightMouseDown:theEvent];
+    else if ([theEvent modifierFlags] & NSAlternateKeyMask) // send to dolly
+        [self otherMouseDown:theEvent];
+    else {
+      NSPoint location = [theEvent locationInWindow];
+      eventType = 2;
+      x = location.x;
+      y = location.y;
+      mbutton = 1;
+    }
+    return;
+}
+ 
+- (void)rightMouseDown:(NSEvent *)theEvent // pan
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 2;
+    x = location.x;
+    y = location.y;     
+    mbutton = 2;
+    return;
+}
+ 
+- (void)otherMouseDown:(NSEvent *)theEvent //dolly
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 2;
+    x = location.x;
+    y = location.y;     
+    mbutton = 3;
+    return;
+}
+ 
+- (void)mouseUp:(NSEvent *)theEvent
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 3;
+    x = location.x;
+    y = location.y;
+    mbutton = 1;
+    return;
+}
+ 
+- (void)rightMouseUp:(NSEvent *)theEvent
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 3;
+    x = location.x;
+    y = location.y;
+    mbutton = 2;
+    return;
+}
+ 
+- (void)otherMouseUp:(NSEvent *)theEvent
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 3;
+    x = location.x;
+    y = location.y;
+    mbutton = 3;
+    return;
+}
+ 
+- (void)mouseDragged:(NSEvent *)theEvent
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 4;
+    x = location.x;
+    y = location.y;
+    mbutton = 1;
+    return;
+}
+ 
+- (void)scrollWheel:(NSEvent *)theEvent
+{
+    float wheelDelta = [theEvent deltaX] +[theEvent deltaY] + [theEvent deltaZ];
+    return;
+}
+ 
+- (void)rightMouseDragged:(NSEvent *)theEvent
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 4;
+    x = location.x;
+    y = location.y;
+    mbutton = 2;
+    return;
+}
+ 
+- (void)otherMouseDragged:(NSEvent *)theEvent
+{
+    NSPoint location = [theEvent locationInWindow];
+    eventType = 4;
+    x = location.x;
+    y = location.y;
+    mbutton = 3;
+    return;
+}
+
+- (BOOL)acceptsFirstResponder
+{
+  return YES;
+}
+ 
+- (BOOL)becomeFirstResponder
+{
+  return  YES;
+}
+ 
+- (BOOL)resignFirstResponder
+{
+  return YES;
+}
+@end
+#endif 
+
+
 
 
 char* cstrstrip (char* inputStr)
@@ -293,7 +487,10 @@ namespace extemp {
 	    { "llvm:bind-global-var",		&SchemeFFI::bind_global_var },
 	    { "llvm:get-function",			&SchemeFFI::get_function },
 	    { "llvm:get-globalvar",			&SchemeFFI::get_globalvar },
+            { "llvm:get-struct-size",           &SchemeFFI::get_struct_size },
+            { "llvm:get-named-struct-size",           &SchemeFFI::get_named_struct_size },
 	    { "llvm:get-function-args",		&SchemeFFI::get_function_args },
+	    { "llvm:get-function-varargs",	&SchemeFFI::get_function_varargs },
 	    { "llvm:get-function-type",		&SchemeFFI::get_function_type },
 	    { "llvm:get-function-calling-conv",	&SchemeFFI::get_function_calling_conv },
 	    { "llvm:get-global-variable-type",	&SchemeFFI::get_global_variable_type },
@@ -321,11 +518,8 @@ namespace extemp {
 	    { "impc:ir:getname",			&SchemeFFI::impcirGetName },
 	    { "impc:ir:gettype",			&SchemeFFI::impcirGetType },		
 	    { "impc:ir:addtodict",			&SchemeFFI::impcirAdd },
-#if defined (TARGET_OS_LINUX)
 	    { "gl:get-event",			&SchemeFFI::getEvent },
-#endif
 #if defined (TARGET_OS_WINDOWS)
-	    { "gl:get-event",			&SchemeFFI::getEvent },
 	    { "gl:add-extension",           &SchemeFFI::addGLExtension },
 #endif
 	    { "gl:make-ctx",			    &SchemeFFI::makeGLContext },	    
@@ -620,6 +814,11 @@ namespace extemp {
     pointer SchemeFFI::ipcCall(scheme* _sc, pointer args)
     {
 	std::string process(string_value(pair_car(args)));
+        SchemeREPL* repl = SchemeREPL::I(process);
+        if(!repl) {
+          std::cout << "BAD IPC: Process name '" << process << "' does not exist!" << std::endl;
+          return _sc->F;
+        }
  	std::stringstream ss;
 	pointer sym = pair_cadr(args);
 	args = pair_cddr(args);
@@ -653,7 +852,7 @@ namespace extemp {
 	    }
 	}
 	std::string str = "("+std::string(symname(sym))+ss.str()+")";
-	SchemeREPL::I(process)->writeString(str);
+        repl->writeString(str);
 	return _sc->T;
     }
     
@@ -1490,6 +1689,12 @@ namespace extemp {
         EXTLLVM::OPTIMIZE_COMPILES = (pair_car(args) == _sc->T) ? 1 : 0; 
         return _sc->T;
     }
+
+    pointer SchemeFFI::verifyCompiles(scheme* _sc, pointer args)
+    {
+        EXTLLVM::VERIFY_COMPILES = (pair_car(args) == _sc->T) ? 1 : 0; 
+        return _sc->T;
+    }
 	
     pointer SchemeFFI::compile(scheme* _sc, pointer args)
     {
@@ -1527,18 +1732,20 @@ namespace extemp {
 	    }			
 	    return _sc->F;
 	}else{
-	    std::string Err;
-	    if (verifyModule(*M, ReturnStatusAction, &Err)) {
-		printf("%s\n%s","Parsed, but not valid!\n",Err.c_str());
-		if(num_of_funcs != M->getFunctionList().size()) {
-		    iplist<Function>::iterator iter = M->getFunctionList().end();
-		    Function* func = dyn_cast<Function>(--iter);
-		    //std::cout << "REMOVING ON FAIL: " << *func << std::endl;
-		    func->dropAllReferences();
-		    func->removeFromParent();
-		}							
-		return _sc->F;
-	    } 
+            if (extemp::EXTLLVM::VERIFY_COMPILES) {
+              std::string Err;
+              if (verifyModule(*M, ReturnStatusAction, &Err)) {
+	        printf("%s\n%s","Parsed, but not valid!\n",Err.c_str());
+	        if(num_of_funcs != M->getFunctionList().size()) {
+                  iplist<Function>::iterator iter = M->getFunctionList().end();
+                  Function* func = dyn_cast<Function>(--iter);
+                  //std::cout << "REMOVING ON FAIL: " << *func << std::endl;
+                  func->dropAllReferences();
+                  func->removeFromParent();
+	        }							
+	        return _sc->F;
+              } 
+            }
 	    return _sc->T;
 	}
     }
@@ -1601,6 +1808,67 @@ namespace extemp {
 
 	int cc = func->getCallingConv();
 	return mk_integer(_sc, cc);
+    }
+
+    pointer SchemeFFI::get_function_varargs(scheme* _sc, pointer args)
+    {
+	using namespace llvm;
+
+	Module* M = EXTLLVM::I()->M;
+	llvm::Function* func = M->getFunction(std::string(string_value(pair_car(args))));
+	if(func == 0)
+	{
+	    return _sc->F;
+	}	
+        return func->isVarArg() ? _sc->T : _sc->F;
+    }
+
+    pointer SchemeFFI::get_struct_size(scheme* _sc, pointer args)
+    {
+	using namespace llvm;
+
+	PassManager* PM = extemp::EXTLLVM::I()->PM;
+	char* struct_type_str = string_value(pair_car(args));
+        unsigned long hash = string_hash((unsigned char*)struct_type_str);
+        char name[128];
+        sprintf(name,"_xtmT%lld",hash);
+        char assm[1024];
+        sprintf(assm,"%%%s = type %s",name,struct_type_str);
+        //printf("parse this! %s\n",assm);
+	SMDiagnostic pa;
+        // Don't!! write this into the default module!
+	const Module* newM = ParseAssemblyString(assm, NULL, pa, getGlobalContext());        
+        if(newM == 0)
+        {
+          return _sc->F;
+        }
+        StructType* type = newM->getTypeByName(std::string(name));
+	if(type == 0)
+	{
+	    return _sc->F;
+	}
+        DataLayout* layout = new DataLayout(newM);
+        const StructLayout* sl = layout->getStructLayout(type);
+        long size = sl->getSizeInBytes();
+        delete layout;
+        return mk_integer(_sc,size);       
+    }
+
+    pointer SchemeFFI::get_named_struct_size(scheme* _sc, pointer args)
+    {
+	using namespace llvm;
+
+	Module* M = EXTLLVM::I()->M;
+        StructType* type = M->getTypeByName(std::string(string_value(pair_car(args))));
+	if(type == 0)
+	{
+	    return _sc->F;
+	}
+        DataLayout* layout = new DataLayout(M);
+        const StructLayout* sl = layout->getStructLayout(type);
+        long size = sl->getSizeInBytes();
+        delete layout;
+        return mk_integer(_sc,size);       
     }
 
     pointer SchemeFFI::get_function_type(scheme* _sc, pointer args)
@@ -3284,10 +3552,55 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 #elif TARGET_OS_MAC
 
+  pointer SchemeFFI::getEvent(scheme* _sc, pointer args)
+  {
+    BasicOpenGLView* view = (BasicOpenGLView*) cptr_value(pair_car(args));
+    switch([view getEventType]) {
+    case 1: {
+      pointer list = _sc->NIL;
+      _sc->imp_env->insert(list);
+      pointer tlist = cons(_sc,mk_integer(_sc,[view getC]),list);
+      _sc->imp_env->erase(list);
+      list = tlist;
+      _sc->imp_env->insert(list);
+      tlist = cons(_sc,mk_integer(_sc,[view getEventType]),list);
+      _sc->imp_env->erase(list);
+      list = tlist;
+      [view setEventType:-1];
+      return list;
+    }
+    case 2:
+    case 3:
+    case 4: {
+      pointer list = _sc->NIL;
+      _sc->imp_env->insert(list);
+      pointer tlist = cons(_sc,mk_integer(_sc,[view getY]),list);
+      _sc->imp_env->erase(list);
+      list = tlist;
+      _sc->imp_env->insert(list);
+      tlist = cons(_sc,mk_integer(_sc,[view getX]),list);
+      _sc->imp_env->erase(list);
+      list = tlist;
+      tlist = cons(_sc,mk_integer(_sc,[view getMButton]),list);
+      _sc->imp_env->erase(list);
+      list = tlist;
+      tlist = cons(_sc,mk_integer(_sc,[view getEventType]),list);
+      _sc->imp_env->erase(list);
+      list = tlist;
+      [view setEventType:-1];
+      return list;
+    }
+    default: {      
+      [view setEventType:-1];
+      return _sc->NIL;
+    }
+    }
+  }
+
   pointer SchemeFFI::glSwapBuffers(scheme* _sc, pointer args)
   {    
     //return objc_glSwapBuffers(_sc, args);
-    NSOpenGLView* view = (NSOpenGLView*) cptr_value(pair_car(args));
+    BasicOpenGLView* view = (BasicOpenGLView*) cptr_value(pair_car(args));
     CGLContextObj ctx = (CGLContextObj) [[view openGLContext] CGLContextObj];
     CGLLockContext(ctx);
     [[view openGLContext] flushBuffer];
@@ -3301,13 +3614,16 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
   {
     //    return objc_glMakeContextCurrent(_sc, args);
     CGLContextObj ctx = CGLGetCurrentContext();
-    NSOpenGLView* view = (NSOpenGLView*) cptr_value(pair_car(args));
+    BasicOpenGLView* view = (BasicOpenGLView*) cptr_value(pair_car(args));
+    //NSOpenGLView* view = (NSOpenGLView*) cptr_value(pair_car(args));
     ctx = (CGLContextObj) [[view openGLContext] CGLContextObj];
     //CGLLockContext(ctx);
     CGLSetCurrentContext(ctx);
     //CGLUnlockContext(ctx);    
     return _sc->T;
   }
+
+
 
 
   pointer SchemeFFI::makeGLContext(scheme* _sc, pointer args)
@@ -3364,8 +3680,8 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       };
 
     NSOpenGLPixelFormat* fmt = [[NSOpenGLPixelFormat alloc] initWithAttributes: (NSOpenGLPixelFormatAttribute*) array]; 
-    //NSOpenGLContext *ctx = _openGLContext = [[NSOpenGLContext alloc] initWithFormat:fmt shareContext:nil];
-    NSOpenGLView* view = [[NSOpenGLView alloc] initWithFrame:screenRect pixelFormat:fmt];
+    //NSOpenGLView* view = [[NSOpenGLView alloc] initWithFrame:screenRect pixelFormat:fmt];
+    BasicOpenGLView* view = [[BasicOpenGLView alloc] initWithFrame:screenRect pixelFormat:fmt];
     
     int windowStyleMask;
     if(fullscrn){
@@ -3390,7 +3706,7 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       [window makeKeyAndOrderFront:nil];				
     }	
     
-    [window display];	
+    [window display];
   
     GLint swapInt = 1;
     [[view openGLContext] setValues:&swapInt forParameter:NSOpenGLCPSwapInterval];
@@ -3400,7 +3716,9 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     CGLSetCurrentContext(ctx);
     CGLLockContext(ctx);
     
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    // glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    // int glerrors = glGetError();
+    // printf("OpenGL Context Errors: %d\n",glerrors);
     CGLEnable( ctx, kCGLCEMPEngine);				
     
     CGLUnlockContext(ctx);
@@ -3414,7 +3732,8 @@ LRESULT CALLBACK WinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     // tlist = cons(_sc,mk_cptr(_sc,(void*)hdc),list);
     // _sc->imp_env->erase(list);
     // list = tlist;
-    [pool release];
+
+    //[pool release];
     
     return mk_cptr(_sc, view); //list; //_cons(_sc, mk_cptr(_sc, (void*)dpy),mk_cptr(_sc,(void*)glxWin),1);
   }

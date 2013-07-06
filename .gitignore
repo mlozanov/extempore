@@ -4,6 +4,8 @@ config/llvm.bash
 /TAGS
 Horde3D_Log.html
 .dir-locals.el
+# llvm build files (if present)
+llvm-build/
 # mode for highlighing LLVM IR files
 # available from http://llvm.org/
 extras/llvm-mode.el
@@ -13,3 +15,11 @@ msvc/
 !msvc/extempore.vcxproj
 !msvc/ms_build_vars.bat
 extempore.pdb
+# ignore extempore keylogs
+keylogs/
+# ignore header files for pre-compiled xtlang code
+*.xtmh
+# distribution archives
+extempore*.tar.gz
+# packaged dylibs
+runtime/lib/

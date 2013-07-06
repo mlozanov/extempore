@@ -4,6 +4,15 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; if not primary process
+(if (not (ipc:get-process-name "primary"))
+    (sys:load-escape "Please load xtm libraries into the primary process"))
+;; if already loaded then break!
+(if (defined? 'xtmlib_adt_loaded)
+    (sys:load-escape "ADT already loaded")) ;; break to top level
+
+(define xtmlib_adt_loaded #t)
+
 (bind-alias bool i1)
 
 ;;;;;;;;;;;;;;;;;;;;
@@ -270,7 +279,7 @@
   (lambda (dat:double* left right)
     (if (< left right)
         (let ((tmp 0.0)
-              (swap (lambda (x y)
+              (swap (lambdas (x y)
                       (set! tmp (pref dat x))
                       (pset! dat x (pref dat y))
                       (pset! dat y tmp)))
@@ -291,3 +300,4 @@
   (lambda (arr:double* n)
     (xsub-quicksortd arr 0 (- n 1))
     arr))
+

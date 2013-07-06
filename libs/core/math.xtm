@@ -1,4 +1,4 @@
-;;; math.xtm -- extempore math library
+;; math.xtm -- extempore math library
 
 ;; Author: Andrew Sorensen, Ben Swift
 ;; Keywords: extempore
@@ -19,6 +19,21 @@
 ;; - windowing
 
 ;;; Code:
+
+
+;; if not primary process
+(if (not (ipc:get-process-name "primary"))
+    (sys:load-escape "Please load xtm libraries into the primary process"))
+;; if already loaded then break!
+(if (defined? 'xtmlib_math_loaded)
+    (sys:load-escape "Math already loaded"))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; GLOBAL to let other libraries know that
+;; math.xtm has already been loaded
+;; 
+(define xtmlib_math_loaded #t)
 
 
 (bind-func deg2rad_f
@@ -115,24 +130,6 @@
 (bind-poly vnorm vnormd)
 (bind-poly vnorm vnormf)
 
-(bind-func vmagd
-  (lambda (v:double* lgth:i64)
-    (let ((mag 0.0)
-	  (i 0))
-      (dotimes (i lgth)
-	(set! mag (+ mag (* (pref v i) (pref v i)))))
-      (sqrt mag))))
-
-(bind-func vmagf
-  (lambda (v:float* lgth:i64)
-    (let ((mag 0.0)
-	  (i 0))
-      (dotimes (i lgth)
-	(set! mag (+ mag (* (pref v i) (pref v i)))))
-      (sqrtf mag))))
-
-(bind-poly vmag vmagd)
-(bind-poly vmag vmagf)
 
 (bind-func vdotd
   (let ((i 0))
@@ -152,6 +149,36 @@
 
 (bind-poly vdot vdotd)
 (bind-poly vdot vdotf)
+
+;; for 3d only SO NO LGTH
+(bind-func vcrossd
+  (let ((i 0))
+    (lambda (v1:double* v2:double* v3:double*)
+      (pfill! v3
+              (- (* (pref v1 1) (pref v2 2))
+                 (* (pref v2 1) (pref v1 2)))
+              (- (* (pref v2 0) (pref v1 2))
+                 (* (pref v1 0) (pref v2 2)))
+              (- (* (pref v1 0) (pref v2 1))
+                 (* (pref v2 0) (pref v1 1))))
+      void)))
+
+
+;; for 3d only SO NO LGTH
+(bind-func vcrossf
+  (let ((i 0))
+    (lambda (v1:float* v2:float* v3:float*)
+      (pfill! v3
+              (- (* (pref v1 1) (pref v2 2))
+                 (* (pref v2 1) (pref v1 2)))
+              (- (* (pref v2 0) (pref v1 2))
+                 (* (pref v1 0) (pref v2 2)))
+              (- (* (pref v1 0) (pref v2 1))
+                 (* (pref v2 0) (pref v1 1))))
+      void)))
+
+(bind-poly vcross vcrossd)
+(bind-poly vcross vcrossf)
 
 (bind-func vsmuld
   (lambda (s:double v1:double* lgth:i64 v2:double*)
@@ -310,9 +337,9 @@
     (let ((i 0) (j 0)
           ;; helper closure for calculating offset
           (idx (if col_major
-                   (lambda (x2:i64 y2:i64)
+                   (lambdas (x2:i64 y2:i64)
                      (+ (* x2 c) y2))
-                   (lambda (x1:i64 y1:i64)
+                   (lambdas (x1:i64 y1:i64)
                      (+ x1 (* y1 r))))))
       (dotimes (j c)
         (printf "[")
@@ -327,9 +354,9 @@
     (let ((i 0) (j 0)
           ;; helper closure for calculating offset
           (idx (if col_major
-                   (lambda (x2:i64 y2:i64)
+                   (lambdas (x2:i64 y2:i64)
                      (+ (* x2 c) y2))
-                   (lambda (x1:i64 y1:i64)
+                   (lambdas (x1:i64 y1:i64)
                      (+ x1 (* y1 r))))))
       (dotimes (j c)
         (printf "[")
@@ -344,9 +371,9 @@
     (let ((i 0) (j 0)
           ;; helper closure for calculating offset
           (idx (if col_major
-                   (lambda (x2:i64 y2:i64)
+                   (lambdas (x2:i64 y2:i64)
                      (+ (* x2 c) y2))
-                   (lambda (x1:i64 y1:i64)
+                   (lambdas (x1:i64 y1:i64)
                      (+ x1 (* y1 r))))))
       (dotimes (j c)
         (printf "[")
@@ -361,9 +388,9 @@
     (let ((i 0) (j 0)
           ;; helper closure for calculating offset
           (idx (if col_major
-                   (lambda (x2:i64 y2:i64)
+                   (lambdas (x2:i64 y2:i64)
                      (+ (* x2 c) y2))
-                   (lambda (x1:i64 y1:i64)
+                   (lambdas (x1:i64 y1:i64)
                      (+ x1 (* y1 r))))))
       (dotimes (j c)
         (printf "[")
@@ -573,7 +600,7 @@
 	(dotimes (j k)
 	  (pset! inv (+ (* i k) j)
 		 (/ (pref mb (+ (* i k) j)) d))))
-      inv)))
+      void)))
 
 ;; invert matrix (floats)
 (bind-func minvf
@@ -612,11 +639,26 @@
 	(dotimes (j k)
 	  (pset! inv (+ (* i k) j)
 		 (/ (pref mb (+ (* i k) j)) d))))
-      inv)))
+      void)))
+
+
 
 ;; poly to minv
 (bind-poly minv minvd)
 (bind-poly minv minvf)
+
+(bind-func mcopyf
+  (lambda (m1:float* row col m2:float*)
+    (memcpy (cast m2 i8*) (cast m1 i8*) (* row col 4))
+    void))
+
+(bind-func mcopyd
+  (lambda (m1:double* row col m2:double*)
+    (memcpy (cast m2 i8*) (cast m1 i8*) (* row col 8))
+    void))
+
+(bind-poly mcopy mcopyf)
+(bind-poly mcopy mcopyd)
 
 ;; some helpful matrix builders
 ;;
@@ -1009,3 +1051,4 @@
                (+ 0.54 (* 0.46 (cos (/ (* TWOPI (i64tod i))
                                        (i64tod (- window_length 1))))))))
       void)))
+

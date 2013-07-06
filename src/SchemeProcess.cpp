@@ -106,8 +106,8 @@ namespace extemp {
 		memcpy(sc->name,_name.c_str(),_name.length()+1);
 		max_duration = sc->call_default_time;
 		//scheme_set_output_port_file(sc, stdout);
-		memset(scheme_outport_string,0,256);
-		scheme_set_output_port_string(sc,scheme_outport_string,&scheme_outport_string[255]);
+		memset(scheme_outport_string,0,SCHEME_OUTPORT_STRING_LENGTH);
+		scheme_set_output_port_string(sc,scheme_outport_string,&scheme_outport_string[SCHEME_OUTPORT_STRING_LENGTH-1]);
 		FILE *initscm = fopen(std::string(load_path).append("init.xtm").c_str(),"r");
 		if(!initscm) {
 			std::cout << "ERROR: Could not locate file: init.xtm" << std::endl << "Exiting system!!" << std::endl;
@@ -455,8 +455,12 @@ namespace extemp {
 
 	bool SchemeProcess::loadFile(const std::string file, const std::string path)
 	{
-
-		FILE* impscm = fopen(std::string(path).append("/").append(file).c_str(),"r");
+                FILE* impscm = 0;
+                if(strlen(path.c_str())>0) {
+                  impscm = fopen(std::string(path).append("/").append(file).c_str(),"r");
+                } else {
+                  impscm = fopen(file.c_str(),"r");
+                }
 		if(!impscm) {
 			std::cout << "ERROR: Unable to locate file: " << path << "/" << file << std::endl;
 			return false;
@@ -550,32 +554,25 @@ namespace extemp {
 		//printf("Loaded... llvmir.xtm\n");
 		scm->loadFile("llvmti.xtm", load_path.c_str());		
 		//printf("Loaded... llvmti.xtm\n");
+               
+                scm->setLoadedLibs(true);
+ 
+                // load any init file provided
                 if(scm->getInitFile().compare("") != 0) {
+                  sleep(2);
+                  ascii_text_color(0,5,10);
+                  printf("\n\nRunning File: %s ...\n\n",scm->getInitFile().c_str());
+                  ascii_text_color(0,7,10);
+                  printf("");
+                  sleep(2); // sleep to make sure NSApp runloops etc. are initialized
 		  scm->loadFile(scm->getInitFile().c_str());
                 }
-
-		// scm->loadFile("mbe.xtm", [resources UTF8String]);
-		// printf("Loading... mbe.xtm\n");
-		// scm->loadFile("au.xtm", [resources UTF8String]);
-		// printf("Loading... au.xtm\n");
-		// scm->loadFile("graphics.xtm", [resources UTF8String]);
-		// printf("Loading... graphics.xtm\n");
-		// scm->loadFile("openglconst.xtm", [resources UTF8String]);
-		// printf("Loading... openglconst.xtm\n");
-		// scm->loadFile("auvisualui.xtm", [resources UTF8String]);
-		// printf("Loading... auvisualui.xtm\n");
-		// scm->loadFile("vdspveclib.xtm", [resources UTF8String]);
-		// printf("Loading... spaces.xtm\n");
-		// scm->loadFile("spaces.xtm", [resources UTF8String]);
-		// printf("Loading... match.xtm\n");
-		// scm->loadFile("match.xtm", [resources UTF8String]);
-		// 
 
 		// //////////////////////////////////////////////////
 		// // this added for dodgy continuations support
                 // ucontext_t* ctx = scm->getContext();
 		// ///////////////////////////////////////////////
-		scm->setLoadedLibs(true);
+	
                 
 		while(scm->getRunning()) {
                		// /////////////////////////////////////////////
@@ -617,7 +614,7 @@ namespace extemp {
 						if(sc->retcode != 0) { //scheme error
 							sc->outport->_object._port->rep.string.curr = scm->scheme_outport_string; //this line sets the sc->outport's current index back to the start of scheme_outport_string						
 							//write(return_socket, scm->scheme_outport_string, strlen(scm->scheme_outport_string)+1);							
-							memset(scm->scheme_outport_string,0,256);
+							memset(scm->scheme_outport_string,0,SCHEME_OUTPORT_STRING_LENGTH);
 						}							
 					}
 					delete evalString;					
@@ -656,7 +653,7 @@ namespace extemp {
 #else
 							write(return_socket, scm->scheme_outport_string, strlen(scm->scheme_outport_string)+1);
 #endif
-							memset(scm->scheme_outport_string,0,256);
+							memset(scm->scheme_outport_string,0,SCHEME_OUTPORT_STRING_LENGTH);
 						}else{
 							ss.str("");		
 							UNIV::printSchemeCell(sc, ss, sc->value);
@@ -697,7 +694,7 @@ namespace extemp {
 						if(sc->retcode != 0) { //scheme error
 							sc->outport->_object._port->rep.string.curr = scm->scheme_outport_string; //this line sets the sc->outport's current index back to the start of scheme_outport_string						
 							//write(return_socket, scm->scheme_outport_string, strlen(scm->scheme_outport_string)+1);							
-							memset(scm->scheme_outport_string,0,256);
+							memset(scm->scheme_outport_string,0,SCHEME_OUTPORT_STRING_LENGTH);
 						}												
 					}else{
 						ss.str("");
@@ -719,7 +716,7 @@ namespace extemp {
 						if(sc->retcode != 0) { //scheme error
 							sc->outport->_object._port->rep.string.curr = scm->scheme_outport_string; //this line sets the sc->outport's current index back to the start of scheme_outport_string						
 							//write(return_socket, scm->scheme_outport_string, strlen(scm->scheme_outport_string)+1);							
-							memset(scm->scheme_outport_string,0,256);
+							memset(scm->scheme_outport_string,0,SCHEME_OUTPORT_STRING_LENGTH);
 						}																		
 					}else{
 						ss.str("");
@@ -902,7 +899,7 @@ namespace extemp {
 						// if we get to 1024 assume we aren't going to get a TERMINATION_CHAR and bomb out
 						if(j>(1024*10)) {
 							ascii_text_color(1,1,10);
-							printf("Error reading eval string from server socket. No terminator received before 10M limit.\n");
+							printf("Error reading eval string from server socket. No terminator received before 10MB limit.\n");
 							ascii_text_color(0,7,10);
 							in_streams[sock]->str("");														
 							evalstr = "";

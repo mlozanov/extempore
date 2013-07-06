@@ -139,11 +139,15 @@ namespace extemp {
 			
 	// llvm stuff
         static pointer optimizeCompiles(scheme* _sc, pointer args);
+        static pointer verifyCompiles(scheme* _sc, pointer args);
 	static pointer compile(scheme* _sc, pointer args);
 	static pointer bind_global_var(scheme* _sc, pointer args);		
 	static pointer get_function(scheme* _sc, pointer args);
 	static pointer get_globalvar(scheme* _sc, pointer args);		
+	static pointer get_struct_size(scheme* _sc, pointer args);		
+	static pointer get_named_struct_size(scheme* _sc, pointer args);		
 	static pointer get_function_args(scheme* _sc, pointer args);		
+	static pointer get_function_varargs(scheme* _sc, pointer args);
 	static pointer get_function_type(scheme* _sc, pointer args);		
 	static pointer get_function_calling_conv(scheme* _sc, pointer args);		
 	static pointer get_global_variable_type(scheme* _sc, pointer args);		
@@ -182,12 +186,8 @@ namespace extemp {
 	static pointer ad_getClockTime(scheme* _sc, pointer args);
 	static pointer ad_setTime(scheme* _sc, pointer args);
 
-#if defined (TARGET_OS_LINUX)
-	// some XWindows guff
 	static pointer getEvent(scheme* _sc, pointer args);
-#endif
 #if defined (TARGET_OS_WINDOWS)
-	static pointer getEvent(scheme* _sc, pointer args);
 	static pointer addGLExtension(scheme* _sc, pointer args);
 #endif
 	static pointer makeGLContext(scheme* _sc, pointer args);

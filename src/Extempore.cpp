@@ -223,24 +223,24 @@ int main(int argc, char** argv)
     [NSApplication sharedApplication];
 #endif
 
+    extemp::AudioDevice* dev = extemp::AudioDevice::I();
+    dev->start();
+
+    extemp::SchemeProcess* utility = new extemp::SchemeProcess(runtimedir, utility_name, utility_port, 0);
+    utility->start();
+
+    extemp::SchemeREPL* utility_repl = new extemp::SchemeREPL(utility_name);
+    utility_repl->connectToProcessAtHostname(host,utility_port);
+
     if(initfile_on) { // if a file needs to be loaded from the command line
        primary = new extemp::SchemeProcess(runtimedir, primary_name, primary_port, 0, initfile);
     }else{
        primary = new extemp::SchemeProcess(runtimedir, primary_name, primary_port, 0);
     }
-
-    extemp::SchemeProcess* utility = new extemp::SchemeProcess(runtimedir, utility_name, utility_port, 0);
-    extemp::AudioDevice* dev = extemp::AudioDevice::I();
-
     primary->start();
-    utility->start();
-    dev->start();
 
     extemp::SchemeREPL* primary_repl = new extemp::SchemeREPL(primary_name);
     primary_repl->connectToProcessAtHostname(host,primary_port);
-    extemp::SchemeREPL* utility_repl = new extemp::SchemeREPL(utility_name);
-    utility_repl->connectToProcessAtHostname(host,utility_port);
-
 
 #ifdef TARGET_OS_MAC
     [[NSApplication sharedApplication] run];
@@ -253,6 +253,5 @@ int main(int argc, char** argv)
 #endif
     }
 #endif
-
     return 0;
 }
