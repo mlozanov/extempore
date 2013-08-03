@@ -1,0 +1,470 @@
+;;; openvg.xtm -- Vector Graphics (currently from ShivaVG)
+
+;; Author: Andrew Sorensen, Ben Swift
+;; Keywords: extempore
+;; Required dylibs: libShivaVG
+
+;;; Commentary:
+
+;; This library provides an xtlang implementation (through the ShivaVG
+;; library) of the OpenVG 2D graphics API. See
+;; examples/external/openvg.xtm for examples of how to draw with
+;; OpenVG in Extempore.
+
+;;; Code:
+
+;; lib-loading config
+(sys:load-preload-check 'openvg)
+
+;; load soil library
+(define libopenvg
+  (let ((platform (sys:platform)))
+    (cond ((string=? platform "Linux") (sys:open-dylib "libOpenVG.so"))
+	  ((string=? platform "Windows") (sys:open-dylib "libOpenVG.dll"))
+	  ((string=? platform "OSX") (sys:open-dylib "libOpenVG.dylib"))
+	  (else (sys:load-escape "Unknown platform for OpenVG lib")))))
+
+(if (null? libopenvg)
+    (sys:load-escape "Could not load OpenVG\n"))
+
+(sys:load "libs/external/image.xtm")
+
+(define *xtmlib-openvg-loaded* #f)
+
+(bind-alias VGint i32)
+(bind-alias VGuint i32)
+(bind-alias VGbitfield i32)
+(bind-alias VGfloat float)
+(bind-alias VGbyte i8)
+(bind-alias VGubyte i8)
+(bind-alias VGshort i16)
+
+(bind-alias VGboolean i32)
+(bind-val VG_FALSE i32 0)
+(bind-val VG_TRUE i32 1)
+
+(bind-alias VGHandle i8*)
+(bind-alias VGPath i8*)
+(bind-alias VGPaint i8*)
+(bind-alias VGImage i8*)
+
+;; enums
+(bind-alias VGErrorCode enum)
+(bind-val VG_NO_ERROR VGErrorCode 0)
+(bind-val VG_BAD_HANDLE_ERROR enum 4096)
+(bind-val VG_ILLEGAL_ARGUMENT_ERROR enum 4097)
+(bind-val VG_OUT_OF_MEMORY_ERROR enum 4098)
+(bind-val VG_PATH_CAPABILITY_ERROR enum 4099)
+(bind-val VG_UNSUPPORTED_IMAGE_FORMAT_ERROR enum 4100)
+(bind-val VG_UNSUPPORTED_PATH_FORMAT_ERROR enum 4101)
+(bind-val VG_IMAGE_IN_USE_ERROR enum 4102)
+(bind-val VG_NO_CONTEXT_ERROR enum 4103)
+
+(bind-alias VGParamType enum)
+(bind-val VG_MATRIX_MODE enum 4352)
+(bind-val VG_FILL_RULE enum 4353)
+(bind-val VG_IMAGE_QUALITY enum 4354)
+(bind-val VG_RENDERING_QUALITY enum 4355)
+(bind-val VG_BLEND_MODE enum 4356)
+(bind-val VG_IMAGE_MODE enum 4357)
+(bind-val VG_SCISSOR_RECTS enum 4358)
+(bind-val VG_STROKE_LINE_WIDTH enum 4368)
+(bind-val VG_STROKE_CAP_STYLE enum 4369)
+(bind-val VG_STROKE_JOIN_STYLE enum 4370)
+(bind-val VG_STROKE_MITER_LIMIT enum 4371)
+(bind-val VG_STROKE_DASH_PATTERN enum 4372)
+(bind-val VG_STROKE_DASH_PHASE enum 4373)
+(bind-val VG_STROKE_DASH_PHASE_RESET enum 4374)
+(bind-val VG_TILE_FILL_COLOR enum 4384)
+(bind-val VG_CLEAR_COLOR enum 4385)
+(bind-val VG_MASKING enum 4400)
+(bind-val VG_SCISSORING enum 4401)
+(bind-val VG_PIXEL_LAYOUT enum 4416)
+(bind-val VG_SCREEN_LAYOUT enum 4417)
+(bind-val VG_FILTER_FORMAT_LINEAR enum 4432)
+(bind-val VG_FILTER_FORMAT_PREMULTIPLIED enum 4433)
+(bind-val VG_FILTER_CHANNEL_MASK enum 4434)
+(bind-val VG_MAX_SCISSOR_RECTS enum 4448)
+(bind-val VG_MAX_DASH_COUNT enum 4449)
+(bind-val VG_MAX_KERNEL_SIZE enum 4450)
+(bind-val VG_MAX_SEPARABLE_KERNEL_SIZE enum 4451)
+(bind-val VG_MAX_COLOR_RAMP_STOPS enum 4452)
+(bind-val VG_MAX_IMAGE_WIDTH enum 4453)
+(bind-val VG_MAX_IMAGE_HEIGHT enum 4454)
+(bind-val VG_MAX_IMAGE_PIXELS enum 4455)
+(bind-val VG_MAX_IMAGE_BYTES enum 4456)
+(bind-val VG_MAX_FLOAT enum 4457)
+(bind-val VG_MAX_GAUSSIAN_STD_DEVIATION enum 4458)
+
+(bind-alias VGRenderingQuality enum)
+(bind-val VG_RENDERING_QUALITY_NONANTIALIASED enum 4608)
+(bind-val VG_RENDERING_QUALITY_FASTER enum 4609)
+(bind-val VG_RENDERING_QUALITY_BETTER enum 4610)
+
+(bind-alias VGPixelLayout enum)
+(bind-val VG_PIXEL_LAYOUT_UNKNOWN enum 4864)
+(bind-val VG_PIXEL_LAYOUT_RGB_VERTICAL enum 4865)
+(bind-val VG_PIXEL_LAYOUT_BGR_VERTICAL enum 4866)
+(bind-val VG_PIXEL_LAYOUT_RGB_HORIZONTAL enum 4867)
+(bind-val VG_PIXEL_LAYOUT_BGR_HORIZONTAL enum 4868)
+
+(bind-alias VGMatrixMode enum)
+(bind-val VG_MATRIX_PATH_USER_TO_SURFACE VGMatrixMode 5120)
+(bind-val VG_MATRIX_IMAGE_USER_TO_SURFACE VGMatrixMode 5121)
+(bind-val VG_MATRIX_FILL_PAINT_TO_USER VGMatrixMode 5122)
+(bind-val VG_MATRIX_STROKE_PAINT_TO_USER VGMatrixMode 5123)
+
+(bind-alias VGMaskOperation enum)
+(bind-val VG_CLEAR_MASK enum 5376)
+(bind-val VG_FILL_MASK enum 5377)
+(bind-val VG_SET_MASK enum 5378)
+(bind-val VG_UNION_MASK enum 5379)
+(bind-val VG_INTERSECT_MASK enum 5380)
+(bind-val VG_SUBTRACT_MASK enum 5381)
+
+(bind-val VG_PATH_FORMAT_STANDARD i32 0)
+
+(bind-alias VGPathDatatype enum)
+(bind-val VG_PATH_DATATYPE_S_8 enum 0)
+(bind-val VG_PATH_DATATYPE_S_16 enum 1)
+(bind-val VG_PATH_DATATYPE_S_32 enum 2)
+(bind-val VG_PATH_DATATYPE_F enum 3)
+
+(bind-alias VGPathAbsRel enum)
+(bind-val VG_ABSOLUTE VGPathAbsRel 0)
+(bind-val VG_RELATIVE VGPathAbsRel 1)
+
+(bind-alias VGPathSegment enum)
+(bind-val VG_CLOSE_PATH VGPathSegment 0)
+(bind-val VG_MOVE_TO VGPathSegment 2)
+(bind-val VG_LINE_TO VGPathSegment 4)
+(bind-val VG_HLINE_TO VGPathSegment 6)
+(bind-val VG_VLINE_TO VGPathSegment 8)
+(bind-val VG_QUAD_TO VGPathSegment 10)
+(bind-val VG_CUBIC_TO VGPathSegment 12)
+(bind-val VG_SQUAD_TO VGPathSegment 14)
+(bind-val VG_SCUBIC_TO VGPathSegment 16)
+(bind-val VG_SCCWARC_TO VGPathSegment 18)
+(bind-val VG_SCWARC_TO VGPathSegment 20)
+(bind-val VG_LCCWARC_TO VGPathSegment 22)
+(bind-val VG_LCWARC_TO VGPathSegment 24)
+
+;; I *think* these are all correct!
+(bind-alias VGPathCommand enum)
+(bind-val VG_MOVE_TO_ABS enum 2)
+(bind-val VG_MOVE_TO_REL enum 3)
+(bind-val VG_LINE_TO_ABS enum 4)
+(bind-val VG_LINE_TO_REL enum 5)
+(bind-val VG_HLINE_TO_ABS enum 6)
+(bind-val VG_HLINE_TO_REL enum 7)
+(bind-val VG_VLINE_TO_ABS enum 8)
+(bind-val VG_VLINE_TO_REL enum 9)
+(bind-val VG_QUAD_TO_ABS enum 10)
+(bind-val VG_QUAD_TO_REL enum 11)
+(bind-val VG_CUBIC_TO_ABS enum 12)
+(bind-val VG_CUBIC_TO_REL enum 13)
+(bind-val VG_SQUAD_TO_ABS enum 14)
+(bind-val VG_SQUAD_TO_REL enum 15)
+(bind-val VG_SCUBIC_TO_ABS enum 16)
+(bind-val VG_SCUBIC_TO_REL enum 17)
+(bind-val VG_SCCWARC_TO_ABS enum 18)
+(bind-val VG_SCCWARC_TO_REL enum 19)
+(bind-val VG_SCWARC_TO_ABS enum 20)
+(bind-val VG_SCWARC_TO_REL enum 21)
+(bind-val VG_LCCWARC_TO_ABS enum 22)
+(bind-val VG_LCCWARC_TO_REL enum 23)
+(bind-val VG_LCWARC_TO_ABS enum 24)
+(bind-val VG_LCWARC_TO_REL enum 25)
+
+
+(bind-alias VGPathCapabilities enum)
+(bind-val VG_PATH_CAPABILITY_APPEND_FROM enum (real->integer (expt 2 0)))
+(bind-val VG_PATH_CAPABILITY_APPEND_TO enum (real->integer (expt 2 1)))
+(bind-val VG_PATH_CAPABILITY_MODIFY enum (real->integer (expt 2 2)))
+(bind-val VG_PATH_CAPABILITY_TRANSFORM_FROM enum (real->integer (expt 2 3)))
+(bind-val VG_PATH_CAPABILITY_TRANSFORM_TO enum (real->integer (expt 2 4)))
+(bind-val VG_PATH_CAPABILITY_INTERPOLATE_FROM enum (real->integer (expt 2 5)))
+(bind-val VG_PATH_CAPABILITY_INTERPOLATE_TO enum (real->integer (expt 2 6)))
+(bind-val VG_PATH_CAPABILITY_PATH_LENGTH enum (real->integer (expt 2 7)))
+(bind-val VG_PATH_CAPABILITY_POINT_ALONG_PATH enum (real->integer (expt 2 8)))
+(bind-val VG_PATH_CAPABILITY_TANGENT_ALONG_PATH enum (real->integer (expt 2 9)))
+(bind-val VG_PATH_CAPABILITY_PATH_BOUNDS enum (real->integer (expt 2 10)))
+(bind-val VG_PATH_CAPABILITY_PATH_TRANSFORMED_BOUNDS enum (real->integer (expt 2 11)))
+(bind-val VG_PATH_CAPABILITY_ALL VGPathCapabilities (real->integer (- (expt 2 12) 1)))
+
+(bind-alias VGPathParamType enum)
+(bind-val VG_PATH_FORMAT enum 5632)
+(bind-val VG_PATH_DATATYPE enum 5633)
+(bind-val VG_PATH_SCALE enum 5634)
+(bind-val VG_PATH_BIAS enum 5635)
+(bind-val VG_PATH_NUM_SEGMENTS enum 5636)
+(bind-val VG_PATH_NUM_COORDS enum 5637)
+
+(bind-alias VGCapStyle enum)
+(bind-val VG_CAP_BUTT enum 5888)
+(bind-val VG_CAP_ROUND enum 5889)
+(bind-val VG_CAP_SQUARE enum 5890)
+
+(bind-alias VGJoinStyle enum)
+(bind-val VG_JOIN_MITER enum 6144)
+(bind-val VG_JOIN_ROUND enum 6145)
+(bind-val VG_JOIN_BEVEL enum 6146)
+
+(bind-alias VGFillRule enum)
+(bind-val VG_EVEN_ODD enum 6400)
+(bind-val VG_NON_ZERO enum 6401)
+
+(bind-alias VGPaintMode enum)
+(bind-val VG_STROKE_PATH VGPaintMode 1)
+(bind-val VG_FILL_PATH VGPaintMode 2)
+
+(bind-alias VGPaintParamType enum)
+(bind-val VG_PAINT_TYPE VGPaintParamType 6656)
+(bind-val VG_PAINT_COLOR VGPaintParamType 6657)
+(bind-val VG_PAINT_COLOR_RAMP_SPREAD_MODE enum 6658)
+(bind-val VG_PAINT_COLOR_RAMP_PREMULTIPLIED enum 6663)
+(bind-val VG_PAINT_COLOR_RAMP_STOPS enum 6659)
+(bind-val VG_PAINT_LINEAR_GRADIENT enum 6660)
+(bind-val VG_PAINT_RADIAL_GRADIENT enum 6661)
+(bind-val VG_PAINT_PATTERN_TILING_MODE enum 6662)
+
+(bind-alias VGPaintType enum)
+(bind-val VG_PAINT_TYPE_COLOR VGPaintType 6912)
+(bind-val VG_PAINT_TYPE_LINEAR_GRADIENT VGPaintType 6913)
+(bind-val VG_PAINT_TYPE_RADIAL_GRADIENT VGPaintType 6914)
+(bind-val VG_PAINT_TYPE_PATTERN VGPaintType 6915)
+
+(bind-alias VGColorRampSpreadMode enum)
+(bind-val VG_COLOR_RAMP_SPREAD_PAD enum 7168)
+(bind-val VG_COLOR_RAMP_SPREAD_REPEAT enum 7169)
+(bind-val VG_COLOR_RAMP_SPREAD_REFLECT enum 7170)
+
+(bind-alias VGTilingMode enum)
+(bind-val VG_TILE_FILL enum 7424)
+(bind-val VG_TILE_PAD enum 7425)
+(bind-val VG_TILE_REPEAT enum 7426)
+(bind-val VG_TILE_REFLECT enum 7427)
+
+;; this list of enums in incomplete, see openvg.h for other formats
+(bind-alias VGImageFormat enum)
+(bind-val VG_sRGBX_8888 VGImageFormat 0)
+(bind-val VG_sRGBA_8888 VGImageFormat 1)
+(bind-val VG_sRGBA_8888_PRE VGImageFormat 2)
+(bind-val VG_lRGBX_8888 VGImageFormat 7)
+(bind-val VG_lRGBA_8888 VGImageFormat 8)
+(bind-val VG_lRGBA_8888_PRE VGImageFormat 9)
+(bind-val VG_lARGB_8888 VGImageFormat 200)
+
+(bind-alias VGImageQuality enum)
+(bind-val VG_IMAGE_QUALITY_NONANTIALIASED enum 1)
+(bind-val VG_IMAGE_QUALITY_FASTER enum 2)
+(bind-val VG_IMAGE_QUALITY_BETTER enum 4)
+
+(bind-alias VGImageParamType enum)
+(bind-val VG_IMAGE_FORMAT enum 7680)
+(bind-val VG_IMAGE_WIDTH enum 7681)
+(bind-val VG_IMAGE_HEIGHT enum 7682)
+
+(bind-alias VGImageMode enum)
+(bind-val VG_DRAW_IMAGE_NORMAL VGImageMode 7936)
+(bind-val VG_DRAW_IMAGE_MULTIPLY VGImageMode 7937)
+(bind-val VG_DRAW_IMAGE_STENCIL VGImageMode 7938)
+
+(bind-alias VGImageChannel enum)
+(bind-val VG_RED enum 8)
+(bind-val VG_GREEN enum 4)
+(bind-val VG_BLUE enum 2)
+(bind-val VG_ALPHA enum 1)
+
+(bind-alias VGBlendMode enum)
+(bind-val VG_BLEND_SRC enum 8192)
+(bind-val VG_BLEND_SRC_OVER enum 8193)
+(bind-val VG_BLEND_DST_OVER enum 8194)
+(bind-val VG_BLEND_SRC_IN enum 8195)
+(bind-val VG_BLEND_DST_IN enum 8196)
+(bind-val VG_BLEND_MULTIPLY enum 8197)
+(bind-val VG_BLEND_SCREEN enum 8198)
+(bind-val VG_BLEND_DARKEN enum 8199)
+(bind-val VG_BLEND_LIGHTEN enum 8200)
+(bind-val VG_BLEND_ADDITIVE enum 8201)
+(bind-val VG_BLEND_SRC_OUT_SH enum 8202)
+(bind-val VG_BLEND_DST_OUT_SH enum 8203)
+(bind-val VG_BLEND_SRC_ATOP_SH enum 8204)
+(bind-val VG_BLEND_DST_ATOP_SH enum 8205)
+
+(bind-alias VGHardwareQueryType enum)
+(bind-val VG_IMAGE_FORMAT_QUERY enum 8448)
+(bind-val VG_PATH_DATATYPE_QUERY enum 8449)
+
+(bind-alias VGHardwareQueryResult enum)
+(bind-val VG_HARDWARE_ACCELERATED enum 8704)
+(bind-val VG_HARDWARE_UNACCELERATED enum 8705)
+
+(bind-alias VGStringID enum)
+(bind-val VG_VENDOR enum 8960)
+(bind-val VG_RENDERER enum 8961)
+(bind-val VG_VERSION enum 8962)
+(bind-val VG_EXTENSIONS enum 8963)
+
+;; VGU enums
+
+(bind-alias VGUErrorCode enum)
+(bind-val VGU_NO_ERROR enum 0)
+(bind-val VGU_BAD_HANDLE_ERROR enum 61440)
+(bind-val VGU_ILLEGAL_ARGUMENT_ERROR enum 61441)
+(bind-val VGU_OUT_OF_MEMORY_ERROR enum 61442)
+(bind-val VGU_PATH_CAPABILITY_ERROR enum 61443)
+(bind-val VGU_BAD_WARP_ERROR enum 61444)
+
+(bind-alias VGUArcType enum)
+(bind-val VGU_ARC_OPEN enum 61696)
+(bind-val VGU_ARC_CHORD enum 61697)
+(bind-val VGU_ARC_PIE enum 61698)
+
+;; closures
+
+(bind-lib libopenvg vgGetError [VGErrorCode]*)
+(bind-lib libopenvg vgFlush [void]*)
+(bind-lib libopenvg vgFinish [void]*)
+
+(bind-lib libopenvg vgSetf [void,VGParamType,VGfloat]*)
+(bind-lib libopenvg vgSeti [void,VGParamType,VGint]*)
+(bind-lib libopenvg vgSetfv [void,VGParamType,VGint,VGfloat*]*)
+(bind-lib libopenvg vgSetiv [void,VGParamType,VGint,VGint*]*)
+
+(bind-lib libopenvg vgGetf [VGfloat,VGParamType]*)
+(bind-lib libopenvg vgGeti [VGint,VGParamType]*)
+(bind-lib libopenvg vgGetVectorSize [VGint,VGParamType]*)
+(bind-lib libopenvg vgGetfv [void,VGParamType,VGint,VGfloat*]*)
+(bind-lib libopenvg vgGetiv [void,VGParamType,VGint,VGint*]*)
+
+(bind-lib libopenvg vgSetParameterf [void,VGHandle,VGParamType,VGfloat]*)
+(bind-lib libopenvg vgSetParameteri [void,VGHandle,VGParamType,VGint]*)
+(bind-lib libopenvg vgSetParameterfv [void,VGHandle,VGParamType,VGint,VGfloat*]*)
+(bind-lib libopenvg vgSetParameteriv [void,VGHandle,VGParamType,VGint,VGint*]*)
+
+(bind-lib libopenvg vgGetParameterf [VGfloat,VGHandle,VGParamType,VGfloat]*)
+(bind-lib libopenvg vgGetParameteri [VGint,VGHandle,VGParamType,VGint]*)
+(bind-lib libopenvg vgGetParameterVectorSize [VGint,VGHandle,VGParamType]*)
+(bind-lib libopenvg vgGetParameterfv [VGHandle,VGParamType,VGint,VGfloat*]*)
+(bind-lib libopenvg vgGetParameteriv [VGHandle,VGParamType,VGint,VGint*]*)
+
+(bind-lib libopenvg vgLoadIdentity [void]*)
+(bind-lib libopenvg vgLoadMatrix [void,VGfloat*]*)
+(bind-lib libopenvg vgGetMatrix [void,VGfloat*]*)
+(bind-lib libopenvg vgMultMatrix [void,VGfloat*]*)
+(bind-lib libopenvg vgTranslate [void,VGfloat,VGfloat]*)
+(bind-lib libopenvg vgScale [void,VGfloat,VGfloat]*)
+(bind-lib libopenvg vgShear [void,VGfloat,VGfloat]*)
+(bind-lib libopenvg vgRotate [void,VGfloat]*)
+
+
+(bind-lib libopenvg vgMask [void,VGImage,VGMaskOperation,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgClear [void,VGint,VGint,VGint,VGint]*)
+
+;; path
+(bind-lib libopenvg vgCreatePath [VGPath,VGint,VGPathDatatype,VGfloat,VGfloat,VGint,VGint,VGbitfield]*)
+(bind-lib libopenvg vgClearPath [void,VGPath,VGbitfield]*)
+(bind-lib libopenvg vgDestroyPath [void,VGPath]*)
+(bind-lib libopenvg vgRemovePathCapabilities [void,VGPath,VGbitfield]*)
+(bind-lib libopenvg vgGetPathCapabilities [VGbitfield,VGPath]*)
+(bind-lib libopenvg vgAppendPath [void,VGPath,VGPath]*)
+(bind-lib libopenvg vgAppendPathData [void,VGPath,VGint,VGubyte*,i8*]*)
+(bind-lib libopenvg vgModifyPathCoords [void,VGPath,VGint,VGint,i8*]*)
+(bind-lib libopenvg vgTransformPath [void,VGPath,VGPath]*)
+(bind-lib libopenvg vgInterpolatePath [VGboolean,VGPath,VGPath,VGPath,VGfloat]*)
+(bind-lib libopenvg vgPathLength [VGboolean,VGPath,VGint,VGint]*)
+(bind-lib libopenvg vgPointAlongPath [void,VGPath,VGint,VGint,VGfloat,VGfloat*,VGfloat*,VGfloat*,VGfloat*]*)
+(bind-lib libopenvg vgPathBounds [void,VGPath,VGfloat*,VGfloat*,VGfloat*,VGfloat*]*)
+(bind-lib libopenvg vgPathTransformedBounds [void,VGPath,VGfloat,VGfloat*,VGfloat*,VGfloat*,VGfloat*]*)
+(bind-lib libopenvg vgDrawPath [void,VGPath,VGbitfield]*)
+
+;; paint
+(bind-lib libopenvg vgCreatePaint [VGPaint]*)
+(bind-lib libopenvg vgDestroyPaint [void,VGPaint]*)
+(bind-lib libopenvg vgSetPaint [void,VGPaint,VGbitfield]*)
+
+;; these functions arent in my shlib for some reason!
+;; (bind-lib libopenvg vgGetPaint [VGPaint,VGPaintMode]*)
+;; (bind-lib libopenvg vgSetColor [void,VGPaint,VGuint]*)
+;; (bind-lib libopenvg vgGetColor [VGuint,VGPaint]*)
+(bind-lib libopenvg vgPaintPattern [void,VGPaint,VGImage]*)
+
+;; image
+(bind-lib libopenvg vgCreateImage [VGImage,VGImageFormat,VGint,VGint,VGbitfield]*)
+(bind-lib libopenvg vgDestroyImage [void,VGImage]*)
+(bind-lib libopenvg vgImageSubData [void,VGImage,i8*,VGint,VGImageFormat,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgGetImageSubData [void,VGImage,i8*,VGint,VGImageFormat,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgChildImage [VGImage,VGImage,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgGetParent [VGImage,VGImage]*)
+(bind-lib libopenvg vgCopyImage [void,VGImage,VGint,VGint,VGImage,VGint,VGint,VGint,VGint,VGboolean]*)
+(bind-lib libopenvg vgDrawImage [void,VGImage]*)
+
+(bind-lib libopenvg vgSetPixels [void,VGint,VGint,VGImage,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgWritePixels [void,i8*,VGint,VGImageFormat,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgGetPixels [void,VGImage,VGint,VGint,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgReadPixels [void,i8*,VGint,VGImageFormat,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgCopyPixels [void,VGint,VGint,VGint,VGint,VGint,VGint]*)
+
+(bind-lib libopenvg vgColorMatrix [void,VGImage,VGImage,VGfloat*]*)
+(bind-lib libopenvg vgConvolve [void,VGImage,VGImage,VGint,VGint,VGint,VGint,VGshort*,VGfloat,VGfloat,VGTilingMode]*)
+(bind-lib libopenvg vgSeparableConvolve [void,VGImage,VGImage,VGint,VGint,VGint,VGint,VGshort*,VGshort*,VGfloat,VGfloat,VGTilingMode]*)
+(bind-lib libopenvg vgGaussianBlur [void,VGImage,VGImage,VGfloat,VGfloat,VGTilingMode]*)
+(bind-lib libopenvg vgLookup [void,VGImage,VGImage,VGubyte*,VGubyte*,VGubyte*,VGubyte*,VGboolean,VGboolean]*)
+(bind-lib libopenvg vgLookupSingle [void,VGImage,VGImage,VGuint*,VGImageChannel,VGboolean,VGboolean]*)
+
+(bind-lib libopenvg vgHardwareQuery [VGHardwareQueryResult,VGHardwareQueryType,VGint]*)
+(bind-lib libopenvg vgGetString [VGubyte*,VGStringID]*)
+
+(bind-val OVG_SH_blend_src_out i32 1)
+(bind-val OVG_SH_blend_dst_out i32 1)
+(bind-val OVG_SH_blend_src_atop i32 1)
+(bind-val OVG_SH_blend_dst_atop i32 1)
+
+(bind-lib libopenvg vgCreateContextSH [VGboolean,VGint,VGint]*)
+(bind-lib libopenvg vgResizeSurfaceSH [void,VGint,VGint]*)
+(bind-lib libopenvg vgDestroyContextSH [void]*)
+
+;; VGU closures
+
+(bind-lib libopenvg vguLine [VGUErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat]*)
+(bind-lib libopenvg vguPolygon [VGUErrorCode,VGPath,VGfloat*,VGint,VGboolean]*)
+(bind-lib libopenvg vguRect [VGUErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat]*)
+(bind-lib libopenvg vguRoundRect [VGUErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat]*)  
+(bind-lib libopenvg vguEllipse [VGUErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat]*)
+(bind-lib libopenvg vguArc [VGUErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGUArcType]*)
+(bind-lib libopenvg vguComputeWarpQuadToSquare [VGUErrorCode,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat*]*)
+(bind-lib libopenvg vguComputeWarpSquareToQuad [VGUErrorCode,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat*]*)
+(bind-lib libopenvg vguComputeWarpQuadToQuad [VGUErrorCode,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat,VGfloat*]*)
+
+;; helpful xtlang functions
+
+(bind-func vgCreateContext
+  (lambda (w h)
+    (vgCreateContextSH w h)))
+
+(bind-func xtm_create_vgpath
+  (lambda ()
+    (vgCreatePath VG_PATH_FORMAT_STANDARD VG_PATH_DATATYPE_F
+                  1.0 0.0 0 0
+                  VG_PATH_CAPABILITY_ALL)))
+
+(bind-func xtm_create_vgimage
+  (lambda (path)
+    (let ((w:i32* (alloc))
+          (h:i32* (alloc))
+          (c:i32* (alloc))
+          (i 0)
+          (row:i8* null)
+          (data:i8* (SOIL_load_image path w h c SOIL_LOAD_RGBA))
+          (img (vgCreateImage VG_lARGB_8888 (pref w 0) (pref h 0)
+                              VG_IMAGE_QUALITY_BETTER)))
+      ;; flip image
+      (dotimes (i (pref h 0))
+        (set! row (pref-ptr data (* i (* (pref w 0) 4))))
+        (vgImageSubData img row (* (pref w 0) 4) VG_lARGB_8888
+                        0
+                        (- (pref h 0) i 1)  (pref w 0) 1))
+      img)))
+      
+(define *xtmlib-openvg-loaded* #t)

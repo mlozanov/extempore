@@ -10,14 +10,8 @@
 
 ;;; Code:
 
-;; if not primary process
-(if (not (ipc:get-process-name "primary"))
-    (sys:load-escape "Please load xtm libraries into the primary process"))
-;; if already loaded then break!
-(if (defined? 'xtmlib_soil_loaded)
-    (sys:load-escape "SOIL already loaded")) ;; break to top level
-
-(define xtmlib_soil_loaded #t)
+;; lib-loading config
+(sys:load-preload-check 'image)
 
 ;; load soil library
 (define libsoil
@@ -26,6 +20,11 @@
 	  ((string=? platform "Windows") (sys:open-dylib "libSOIL.dll"))
 	  ((string=? platform "OSX") (sys:open-dylib "libSOIL.dylib"))
 	  (else (sys:load-escape "Unknown platform for soil lib")))))
+
+(if (null? libsoil) 
+    (sys:load-escape "Could not load libSOIL\n"))
+
+(define *xtmlib-image-loaded* #t)
 
 
 (bind-lib libsoil SOIL_load_OGL_texture [i32,i8*,i32,i32,i32]*)
@@ -176,9 +175,8 @@
   (lambda (width height channels type data texid)
     (let* ((tex:i32* (salloc)))
       (pset! tex 0 texid)
-      ;(printf "load image: size: w:%d h:%d: channels:%d\n" width height channels)
       (if (< texid 1) (glGenTextures 1 tex))
-      ;(printf "tex: %d\n" (pref tex 0))
+      (glEnable GL_TEXTURE_2D)
       (glBindTexture GL_TEXTURE_2D (pref tex 0))
       ;;(glPixelStorei GL_UNPACK_ALIGNMENT 1) ;; this causes problems!!!
       (glTexParameteri GL_TEXTURE_2D GL_TEXTURE_WRAP_S GL_CLAMP)

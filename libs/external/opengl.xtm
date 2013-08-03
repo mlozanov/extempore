@@ -10,19 +10,14 @@
 
 ;;; Code:
 
-
-;; if not primary process
-(if (not (ipc:get-process-name "primary"))
-    (sys:load-escape "Please load xtm libraries into the primary process"))
-;; if already loaded then break!
-(if (defined? 'xtmlib_opengl_loaded)
-    (sys:load-escape "OpenGL already loaded")) ;; break to top level
-
-(define xtmlib_opengl_loaded #t)
+;; lib-loading config
+(sys:load-preload-check 'opengl)
 
 ;; first make sure that math.xtm is loaded
 (sys:load "libs/core/math.xtm")
 (sys:load "libs/external/image.xtm")
+
+(define *xtmlib-opengl-loaded* #t)
 
 ;; first check if we are windows we need to load some extensions!
 (if (string=? (sys:platform) "Windows")
@@ -191,9 +186,9 @@
   (lambda ()
     (glEnable GL_LIGHTING)
     (glEnable GL_LIGHT0)
-    (let ((diffuse (heap-alloc 4 float))
-	  (specular (heap-alloc 4 float))
-	  (position (heap-alloc 4 float)))      
+    (let ((diffuse:float* (halloc 4))
+	  (specular:float* (halloc 4))
+	  (position:float* (halloc 4)))
       (pset! diffuse 0 1.0)
       (pset! diffuse 1 1.0)
       (pset! diffuse 2 1.0)
@@ -844,8 +839,8 @@
   (let ((err GL_NO_ERROR))
     (lambda ()
       (set! err (glGetError))
-      (if (<> err GL_NO_ERROR)
-          (ascii_text_color 0 1 10))
+      ;; (if (<> err GL_NO_ERROR)
+      ;;     (ascii_text_color 0 1 10))
       (cond
        ((= err GL_INVALID_ENUM)
         (printf "GL ERR: Invalid ENUM: %d\n" err))
@@ -871,9 +866,9 @@
         ;; do nothing
         (printf "GL ERR: %d\n" err)
         ))
-      (if (<> err GL_NO_ERROR)
-          (begin
-            (ascii_text_color 0 7 10)
-            (printf "")))
+      ;; (if (<> err GL_NO_ERROR)
+      ;;     (begin
+      ;;       (ascii_text_color 0 7 10)
+      ;;       (printf "")))
       void)))
 

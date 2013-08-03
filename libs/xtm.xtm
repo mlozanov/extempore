@@ -1,42 +1,43 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; to compile xtm.bc file
+;; to compile xtm.{dylib,so,dll} shared library (for faster loading)
+
+;; ;; first compile the xtlang code you want in the shared lib
 ;;
-;; first export module to bitcode:
+;; (sys:load "libs/core/math.xtm")
+;; (sys:load "libs/external/opengl.xtm")
+;; (sys:load "libs/external/shaders.xtm")
+;; (sys:load "libs/external/assimp.xtm")
+;; (sys:load "libs/core/audio_dsp.xtm")
+;; (sys:load "libs/core/instruments.xtm")
+;; (sys:load "libs/external/sndfile.xtm")
+;; (sys:load "libs/external/openvg.xtm")
+;; (sys:load "libs/external/instruments.xtm")
 
-(define *compile-xtm-stdlib* #f)
+;; ;; then export the module to bitcode
+;;
+;; (begin (llvm:export-module "/tmp/xtm.bc")
+;;        ;; print further instructions
+;;        (print "\nLLVM bitcode for the xtlang standard library exported to \"/tmp/xtm.bc\". To finish compiling the stdlib, enter the following command in a terminal window (inserting the proper path to your LLVM install):\n\n")
+;;        (cond ((string=? (sys:platform) "Linux")
+;;               (print "/path/to/llvm-3.2/Release/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtm.bc && gcc --shared -g /tmp/xtm.s -o ./xtm.so\n"))
+;;              ((string=? (sys:platform) "OSX")
+;;               (print "/path/to/llvm-3.2/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtm.bc && clang -O3 -dynamiclib -undefined dynamic_lookup /tmp/xtm.s -o ./xtm.dylib\n"))
+;;              (else (print "Sorry, cannot find the appropriate compilation command for your platform at this time."))))
 
-(if *compile-xtm-stdlib*
-    (begin (sys:load "libs/core/math.xtm")
-           (sys:load "libs/external/opengl.xtm")
-           (sys:load "libs/external/shaders.xtm")
-           (sys:load "libs/external/assimp.xtm")
-           (sys:load "libs/core/audio_dsp.xtm")
-           (sys:load "libs/core/instruments.xtm")
-           (sys:load "libs/external/sndfile.xtm")
-           (sys:load "libs/external/instruments.xtm")))
-
-(if *compile-xtm-stdlib*
-    (llvm:export-module "/tmp/xtm.bc"))
-
-;; Now, here are the shell invocations:
+;; ;; Then compile bitcode into a shared lib
 
 ;; Linux:
 ;; /path/to/llvm-3.2/Release/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtm.bc && gcc --shared -g /tmp/xtm.s -o ./xtm.so
 
 ;; OSX:
-;; /path/to/llvm-3.2/Release/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtm.bc && clang -O3 -dynamiclib -undefined dynamic_lookup /tmp/xtm.s -o ./xtm.dylib
+;; /usr/local/Cellar/extempore-llvm/3.2/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtm.bc && clang -O3 -dynamiclib -undefined dynamic_lookup /tmp/xtm.s -o ./xtm.dylib
 
 ;; emacs regex for generating the header file:
 ;; Compiled \(.*\) >>> \(.*\) -> (bind-lib-func stdlib \1 \2)
 
-
-;; if not primary process
-(if (not (ipc:get-process-name "primary"))
-    (sys:load-escape "Please load xtm libraries into the primary process"))
-;; if already loaded then break!
-(if (defined? 'xtmlib_xtm_loaded)
-    (sys:load-escape "XTM standard lib already loaded")) ;; break to top level
+;; lib-loading config
+(sys:load-preload-check 'stdlib)
 
 (define stdlib
   (let ((platform (sys:platform)))
@@ -58,10 +59,11 @@
 
 ;;;;;;  MATH SETUP ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(if (defined? 'xtmlib_math_loaded)
-    (sys:load-escape "Sorry cannot load xtm standard lib: math already preloaded"))
+;; lib-loading config
+(sys:load-preload-check 'math)
 
-(define xtmlib_math_loaded #t)
+(print "Loading math library...")
+(define *xtmlib-math-loaded* #f)
 
 (bind-type cpxd <double,double>)
 (bind-type cpxf <float,float>)
@@ -212,14 +214,14 @@
 (bind-poly buffer_re_only buffer_re_only_cpxd)
 (bind-poly buffer_im_only buffer_re_only_cpxd)
 
-(println 'MATH 'LOADED)
+(define *xtmlib-math-loaded* #t)
+(print "done.\n")
 
 ;;;;;;  IMAGE SETUP ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(if (defined? 'xtmlib_image_loaded)
-    (sys:load-escape "Sorry cannot load xtm standard lib: image already preloaded"))
+;; lib-loading config
 
-(define xtmlib_image_loaded #t)
+(sys:load-preload-check 'image)
 
 (define libsoil
   (let ((platform (sys:platform)))
@@ -228,36 +230,39 @@
 	  ((string=? platform "OSX") (sys:open-dylib "libSOIL.dylib"))
 	  (else (print "Unknown platform: " platform)))))
 
+(define *xtmlib-image-loaded* #f)
+(print "Loading image library...")
+
 (bind-lib libsoil SOIL_load_OGL_texture [i32,i8*,i32,i32,i32]*)
 (bind-lib libsoil SOIL_load_OGL_texture_from_memory [i32,i8*,i32,i32,i32,i32]*)
 (bind-lib libsoil SOIL_load_image [i8*,i8*,i32*,i32*,i32*,i32]*)
 
-(bind-lib-val stdlib SOIL_FLAG_POWER_OF_TWO i32 1)
-(bind-lib-val stdlib SOIL_FLAG_MIPMAPS i32 2)
-(bind-lib-val stdlib SOIL_FLAG_TEXTURE_REPEATS i32 4)
-(bind-lib-val stdlib SOIL_FLAG_MULTIPLY_ALPHA i32 8)
-(bind-lib-val stdlib SOIL_FLAG_INVERT_Y i32 16)
-(bind-lib-val stdlib SOIL_FLAG_COMPRESS_TO_DXT i32 32)
-(bind-lib-val stdlib SOIL_FLAG_DDS_LOAD_DIRECT i32 64)
-(bind-lib-val stdlib SOIL_FLAG_NTSC_SAFE_RGB i32 128)
-(bind-lib-val stdlib SOIL_FLAG_CoCg_Y i32 256)
-(bind-lib-val stdlib SOIL_FLAG_TEXTURE_RECTANGLE i32 512)
+(bind-lib-val stdlib SOIL_FLAG_POWER_OF_TWO i32)
+(bind-lib-val stdlib SOIL_FLAG_MIPMAPS i32)
+(bind-lib-val stdlib SOIL_FLAG_TEXTURE_REPEATS i32)
+(bind-lib-val stdlib SOIL_FLAG_MULTIPLY_ALPHA i32)
+(bind-lib-val stdlib SOIL_FLAG_INVERT_Y i32)
+(bind-lib-val stdlib SOIL_FLAG_COMPRESS_TO_DXT i32)
+(bind-lib-val stdlib SOIL_FLAG_DDS_LOAD_DIRECT i32)
+(bind-lib-val stdlib SOIL_FLAG_NTSC_SAFE_RGB i32)
+(bind-lib-val stdlib SOIL_FLAG_CoCg_Y i32)
+(bind-lib-val stdlib SOIL_FLAG_TEXTURE_RECTANGLE i32)
 
-(bind-lib-val stdlib SOIL_LOAD_AUTO i32 0)
-(bind-lib-val stdlib SOIL_LOAD_L i32 1)
-(bind-lib-val stdlib SOIL_LOAD_LA i32 2)
-(bind-lib-val stdlib SOIL_LOAD_RGB i32 3)
-(bind-lib-val stdlib SOIL_LOAD_RGBA i32 4)
+(bind-lib-val stdlib SOIL_LOAD_AUTO i32)
+(bind-lib-val stdlib SOIL_LOAD_L i32)
+(bind-lib-val stdlib SOIL_LOAD_LA i32)
+(bind-lib-val stdlib SOIL_LOAD_RGB i32)
+(bind-lib-val stdlib SOIL_LOAD_RGBA i32)
 
-(bind-lib-val stdlib SOIL_SAVE_TYPE_TGA i32 0)
-(bind-lib-val stdlib SOIL_SAVE_TYPE_BMP i32 1)
-(bind-lib-val stdlib SOIL_SAVE_TYPE_DDS i32 2)
+(bind-lib-val stdlib SOIL_SAVE_TYPE_TGA i32)
+(bind-lib-val stdlib SOIL_SAVE_TYPE_BMP i32)
+(bind-lib-val stdlib SOIL_SAVE_TYPE_DDS i32)
 
-(bind-lib-val stdlib GL_RED i32 6403)
-(bind-lib-val stdlib GL_UNSIGNED_SHORT i32 5123)
-(bind-lib-val stdlib GL_2_BYTES i32 5127)
-(bind-lib-val stdlib GL_4_BYTES i32 5129)
-(bind-lib-val stdlib GL_BGRA i32 32993)
+(bind-lib-val stdlib GL_RED i32)
+(bind-lib-val stdlib GL_UNSIGNED_SHORT i32)
+(bind-lib-val stdlib GL_2_BYTES i32)
+(bind-lib-val stdlib GL_4_BYTES i32)
+(bind-lib-val stdlib GL_BGRA i32)
 
 (bind-lib-func stdlib gl_load_image_rect [i32,i8*,i32]*)
 (bind-lib-func stdlib gl_load_image [i32,i8*,i32]*)
@@ -275,16 +280,14 @@
 (bind-lib-func stdlib gl_draw_img_from_img [void,double,double,double,double,double,double,double,double,double,i32]*)
 (bind-lib-func stdlib gl_draw_img_reverse [void,double,double,double,double,double,i32]*)
 
-(println 'SOIL 'LOADED)
-
+(define *xtmlib-image-loaded* #t)
+(print "done.\n")
 
 ;;;;;;;;;; OPENGL SETUP ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(if (defined? 'xtmlib_opengl_loaded)
-    (sys:load-escape "Sorry cannot load xtm standard lib: opengl already preloaded"))
-
-(define xtmlib_opengl_loaded #t)
-
+(sys:load-preload-check 'opengl)
+(define *xtmlib-opengl-loaded* #f)
+(print "Loading opengl library...")
 
 (bind-type E_vbo <i32,i32,i8*>)
 (bind-type E_fbo <i32,i32,i32,i32,i32>)
@@ -314,49 +317,49 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; missing opengl constants
 
-(bind-lib-val stdlib GL_VIEWPORT_BIT i32 2048)
-(bind-lib-val stdlib GL_ENABLE_BIT i32 8192)
-(bind-lib-val stdlib GL_VERTEX_PROGRAM_POINT_SIZE i32 34370)
-(bind-lib-val stdlib GL_COORD_REPLACE i32 34914)
+(bind-lib-val stdlib GL_VIEWPORT_BIT i32)
+(bind-lib-val stdlib GL_ENABLE_BIT i32)
+(bind-lib-val stdlib GL_VERTEX_PROGRAM_POINT_SIZE i32)
+(bind-lib-val stdlib GL_COORD_REPLACE i32)
 
-(bind-lib-val stdlib GL_ONE_MINUS_SRC_ALPHA i32 771)
-(bind-lib-val stdlib GL_ONE_MINUS_SRC_COLOR i32 769)
-(bind-lib-val stdlib GL_ONE_MINUS_DST_COLOR i32 775)
+(bind-lib-val stdlib GL_ONE_MINUS_SRC_ALPHA i32)
+(bind-lib-val stdlib GL_ONE_MINUS_SRC_COLOR i32)
+(bind-lib-val stdlib GL_ONE_MINUS_DST_COLOR i32)
 
 ;;;;;;;;;;;;;;;;;;;;;;;  FBO stuff
-(bind-lib-val stdlib GL_DRAW_FRAMEBUFFER i32 36009)
-(bind-lib-val stdlib GL_READ_FRAMEBUFFER i32 36008)
-(bind-lib-val stdlib GL_FRAMEBUFFER i32 36160)
-(bind-lib-val stdlib GL_RENDERBUFFER i32 36161)
-(bind-lib-val stdlib GL_RENDERBUFFER_WIDTH i32 36162)
-(bind-lib-val stdlib GL_RENDERBUFFER_HEIGHT i32 36163)
-(bind-lib-val stdlib GL_RENDERBUFFER_INTERNAL_FORMAT i32 36164)
-(bind-lib-val stdlib GL_FRAMEBUFFER_COMPLETE i32 36053)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT0 i32 36064)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT1 i32 36065)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT2 i32 36066)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT3 i32 36067)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT4 i32 36068)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT5 i32 36069)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT6 i32 36070)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT7 i32 36071)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT8 i32 36072)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT9 i32 36073)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT10 i32 36074)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT11 i32 36075)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT12 i32 36076)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT13 i32 36077)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT14 i32 36078)
-(bind-lib-val stdlib GL_COLOR_ATTACHMENT15 i32 36079)
+(bind-lib-val stdlib GL_DRAW_FRAMEBUFFER i32)
+(bind-lib-val stdlib GL_READ_FRAMEBUFFER i32)
+(bind-lib-val stdlib GL_FRAMEBUFFER i32)
+(bind-lib-val stdlib GL_RENDERBUFFER i32)
+(bind-lib-val stdlib GL_RENDERBUFFER_WIDTH i32)
+(bind-lib-val stdlib GL_RENDERBUFFER_HEIGHT i32)
+(bind-lib-val stdlib GL_RENDERBUFFER_INTERNAL_FORMAT i32)
+(bind-lib-val stdlib GL_FRAMEBUFFER_COMPLETE i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT0 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT1 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT2 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT3 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT4 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT5 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT6 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT7 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT8 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT9 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT10 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT11 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT12 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT13 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT14 i32)
+(bind-lib-val stdlib GL_COLOR_ATTACHMENT15 i32)
 
-(bind-lib-val stdlib GL_DEPTH_ATTACHMENT i32 36096)
-(bind-lib-val stdlib GL_DEPTH_COMPONENT24 i32 33190)
-(bind-lib-val stdlib GL_MODELVIEW_MATRIX i32 2982)
-(bind-lib-val stdlib GL_TEXTURE_MATRIX i32 2984)
-(bind-lib-val stdlib GL_RGBA16F i32 34842)
-(bind-lib-val stdlib GL_RGBA8 i32 32856)
+(bind-lib-val stdlib GL_DEPTH_ATTACHMENT i32)
+(bind-lib-val stdlib GL_DEPTH_COMPONENT24 i32)
+(bind-lib-val stdlib GL_MODELVIEW_MATRIX i32)
+(bind-lib-val stdlib GL_TEXTURE_MATRIX i32)
+(bind-lib-val stdlib GL_RGBA16F i32)
+(bind-lib-val stdlib GL_RGBA8 i32)
 
-(bind-lib-val stdlib GL_RENDERER i32 7937)
+(bind-lib-val stdlib GL_RENDERER i32)
 
 (if (not (string=? "Windows" (sys:platform)))
     (begin 
@@ -405,20 +408,106 @@
 (bind-lib-func stdlib fill_view_matrix [void,float*,float*,float*,float*]*)
 (bind-lib-func stdlib fill_view_matrix_dir [void,float*,float*,float*,float*]*)
 
-(println 'OPENGL 'LOADED)
+(define *xtmlib-opengl-loaded* #t)
+(print "done.\n")
 
 ;;; SHADER SETUP ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define xtmlib_shaders_loaded #t)
+(sys:load-preload-check 'shaders)
+(define *xtmlib-shaders-loaded* #f)
+(print "Loading shaders library...")
+
+(bind-alias XTMRENDERCB [void,i64,i32,float*,float*,float*,i8*]*)
+
+(bind-type xtm_mesh <E_vbo*,i32,float*,float*,float*,float*,float,float,i32>)
+(bind-type xtm_node <i8*,float*,xtm_node*,i32,xtm_node*,i32,xtm_mesh*>)
+(bind-type xtm_camera <float*,float*,float*>)
+(bind-type xtm_lights <float*,float*,float*,float*,float*,float*,float*,float*,float*,i32>)
+
+(bind-val xtm_render_s1 i32 0)
+(bind-val xtm_render_s2 i32 0)
+(bind-val xtm_render_s3 i32 0)
+(bind-val xtm_render_s4 i32 0)
+(bind-val xtm_render_x i32 0)
+(bind-val xtm_render_y i32 0)
+(bind-val xtm_render_w i32 1024)
+(bind-val xtm_render_h i32 768)
+(bind-val xtm_render_angle float 35.0)
+(bind-val xtm_render_near float 0.1)
+(bind-val xtm_render_far float 100.0)
+
+(bind-lib-func stdlib xtm_build_mesh_vbo [E_vbo*,float*,i32]*)
+(bind-lib-func stdlib xtm_make_node_a [xtm_node*,i8*,float*,i32,float,float,float]*)
+
+(bind-lib-func stdlib xtm_get_camera [xtm_camera*]*)
+(bind-lib-func stdlib xtm_camera_pos [void,float,float,float]*)
+(bind-lib-func stdlib xtm_camera_tgt [void,float,float,float]*)
+(bind-lib-func stdlib xtm_camera_up [void,float,float,float]*)
+(bind-lib-func stdlib xtm_camera_view [void,float*]*)
+(bind-lib-func stdlib xtm_update_camera [void,i32]*)
+
+(bind-lib-func stdlib xtm_get_lights [xtm_lights*]*)
+(bind-lib-func stdlib xtm_light_pos [void,i32,float,float,float]*)
+(bind-lib-func stdlib xtm_light_tgt [void,i32,float,float,float]*)
+(bind-lib-func stdlib xtm_light_up [void,i32,float,float,float]*)
+(bind-lib-func stdlib xtm_light_ambient [void,i32,float,float,float,float]*)
+(bind-lib-func stdlib xtm_light_diffuse [void,i32,float,float,float,float]*)
+(bind-lib-func stdlib xtm_light_specular [void,i32,float,float,float,float]*)
+(bind-lib-func stdlib xtm_light_power [void,i32,float]*)
+(bind-lib-func stdlib xtm_light_angle [void,i32,float]*)
+(bind-lib-func stdlib xtm_light_view [void,i32,float*]*)
+(bind-lib-func stdlib xtm_update_lights [void,i32]*)
+(bind-lib-func stdlib xtm_update_matrices [void,i32,float*,float*,float*]*)
+(bind-lib-func stdlib xtm_draw_mesh [void,xtm_mesh*,i32]*)
+(bind-lib-func stdlib xtm_draw_node [void,xtm_node*,i32,float*,float*,float*]*)
+(bind-lib-func stdlib xtm_draw_model [void,xtm_node*,i32,float*,float*,float*]*)
+
+(bind-lib-func stdlib xtm_draw_tex [void,i32,i32,float*,float*,float*]*)
+
+(bind-lib-func stdlib xtm_render_fbo [E_fbo*]*)
+(bind-lib-func stdlib xtm_render_setup_a [void,i32,i32,i8*,i8*,i8*,i8*,i8*,i8*,i8*]*)
+(bind-lib-func stdlib xtm_render_setup_b [void,i32,i32,float,float,i8*,i8*,i8*,i8*,i8*,i8*,i8*]*)
+(bind-lib-func stdlib xtm_render_setup_c [void,i32,i32,i32,i32,float,float,float,i8*,i8*,i8*,i8*,i8*,i8*,i8*]*)
+
+(bind-lib-func stdlib xtm_render [i64,[void,i64,i32,float*,float*,float*,i8*]*,[void,i64,i32,float*,float*,float*,i8*]*,[void,i64,i32,float*,float*,float*,i8*]*,[void,i64,i32,float*,float*,float*,i8*]*,i8*]*)
 
 (bind-lib-func stdlib gl_draw_shader_quad [void,double,double,double,double,double,double,double]*)
 (bind-lib-func stdlib shader_set_grid_offsets [void,float*,float,float,float]*)
 (bind-lib-func stdlib shader_setup_convolution_filter [void,float*,i32,float]*)
 (bind-lib-func stdlib shader_update_camera [void,i32,float*,float*]*)
 (bind-lib-func stdlib shader_update_light [void,i32,float*,float*,float,float,float*,float*,float*]*)
+(bind-lib-func stdlib shader_update_lights [void,i32,i32,float*,float*,float*,float*,float*,float*,float*]*)
 (bind-lib-func stdlib shader_update_matrices [void,i32,float*,float*,float*]*)
 (bind-lib-func stdlib shader_update_matrices_lv [void,i32,float*,float*,float*,float*]*)
+(bind-lib-func stdlib shader_update_matrices_lvs [void,i32,float*,float*,float*,i32,float*]*);
 (bind-lib-func stdlib shader_update_material [void,i32,float*,float*,float*,float]*)
+
+(bind-poly xtm_make_node xtm_make_node_a)
+
+(bind-poly xtm_render_setup xtm_render_setup_a)
+(bind-poly xtm_render_setup xtm_render_setup_b)
+(bind-poly xtm_render_setup xtm_render_setup_c)
+
+(define xtm_render_setup
+  (lambda (w h . args)
+    (if (null? args)
+        (xtm_render_setup_a w h
+                            simple-vert-xtm simple-frag
+                            xtmvert-xtm xtmfrag xtmfrag_nolight
+                            quad-vert quad-frag)
+        (cond ((= (length args) 2)
+               (xtm_render_setup_b w h (car args) (cadr args)
+                                   simple-vert-xtm simple-frag
+                                   xtmvert-xtm xtmfrag xtmfrag_nolight
+                                   quad-vert quad-frag))
+              ((= (length args) 5)
+               (xtm_render_setup_c w h (car args) (cadr args)
+                                   (caddr args) (cadddr args)
+                                   (car (cddddr args))
+                                   simple-vert-xtm simple-frag
+                                   xtmvert-xtm xtmfrag xtmfrag_nolight
+                                   quad-vert quad-frag))
+              (else (println 'Wrong 'number 'or 'args 'for 'xtm_render_setup))))))
 
 
 ;; load up glsl code
@@ -1059,6 +1148,7 @@ void main()
 //#version 120
 varying vec3 N, L, E, V;
 varying float D;
+
 uniform vec4 LightAmbient;
 uniform vec4 LightDiffuse;
 uniform vec4 LightSpecular;
@@ -1151,12 +1241,249 @@ else
 }
 ")
 
-(println 'SHADERS 'LOADED)
+
+(define xtmvert-xtm
+  "
+#version 120
+
+attribute vec4 xtmVertex;
+attribute vec3 xtmNormal;
+attribute vec3 xtmUVW;
+attribute vec4 xtmColor;
+
+varying vec3 N, E, V;
+varying vec3 L[10];
+varying float D[10];
+
+uniform vec4 LightPos[10];
+uniform vec4 CameraPos;
+
+uniform mat4 ModelMatrix;
+uniform mat4 ViewMatrix;
+uniform mat4 ProjectionMatrix;
+uniform mat3 NormalMatrix;
+uniform mat4 ModelViewMatrix;
+uniform mat4 ModelViewProjectionMatrix;
+
+uniform mat4 LightModelViewProjectionMatrix[10];
+
+uniform float numlights;
+
+varying vec4 lightVertexPosition[10];
+varying vec3 UVWCoord;
+varying vec4 Color;
+
+
+void main()
+{
+  gl_Position = ModelViewProjectionMatrix * xtmVertex;
+  vec4 vPosition = ModelViewMatrix * xtmVertex;
+  N = NormalMatrix * xtmNormal; //normal
+  float j = 0.5;
+  for(int i=0; j<numlights; i++, j+=1.0) {
+    L[i] = (LightPos[i] - (ModelMatrix * xtmVertex)).xyz; // vector from source to light
+    if(LightPos[i].w == 0.0) L[i] = LightPos[i].xyz; // i.e. if LightPos is already a direction vector
+    D[i] = length(L[i]);
+    lightVertexPosition[i] = LightModelViewProjectionMatrix[i] * xtmVertex;
+  }
+  V = vPosition.xyz; // vertex (3d)
+  E = (CameraPos - vPosition).xyz; // vector from source to eye
+  UVWCoord = xtmUVW;
+  Color = xtmColor;  
+}
+")
+
+(define xtmfrag
+  "
+//#version 120
+varying vec3 N, E, V;
+varying vec3 L[10];
+varying float D[10];
+
+uniform vec4 LightAmbient[10];
+uniform vec4 LightDiffuse[10];
+uniform vec4 LightSpecular[10];
+uniform float ConstantAttenuation[10];
+uniform float LinearAttenuation[10];
+uniform float QuadraticAttenuation[10];
+uniform float SpotAngle[10];
+uniform vec4 SpotDir[10];
+uniform float SpotExponent[10];
+
+uniform float numlights;
+
+uniform vec4 CameraDir;
+uniform float MaterialShininess;
+uniform vec4 MaterialAmbient;
+uniform vec4 MaterialDiffuse;
+uniform vec4 MaterialSpecular;
+
+uniform mat4 ModelMatrix;
+uniform mat4 ViewMatrix;
+uniform mat4 ProjectionMatrix;
+uniform mat4 NormalMatrix;
+uniform mat4 ModelViewMatrix;
+uniform mat4 ModelViewProjectionMatrix;
+
+uniform sampler2D shadowMap;
+uniform sampler2D tex1;
+uniform float IsTextured;
+
+varying vec4 lightVertexPosition[10];
+varying vec3 UVWCoord;
+varying vec4 Color;
+
+void main()
+{
+  vec4 outcolor = vec4(0.0);
+  float j = 0.5;
+  vec4 ambient,diffuse,specular;
+  vec3 HV;
+  float pf; // powerfactor
+  float nDotHV, nDotLL;
+  float attenuation, spotDot, spotAttenuation;
+  vec4 TexColor; // texture color
+
+  vec3 NN = normalize(N); // surface normal
+  vec3 EE = normalize(E); // eye vector
+  vec3 VV = normalize(V); // vertex 3d
+
+  for(int i=0; j<numlights; i++, j+=1.0) 
+  {  
+    vec3 LL = normalize(L[i]); // light vector
+    attenuation = 1.0 / (ConstantAttenuation[i] + (LinearAttenuation[i] * D[i]) + (QuadraticAttenuation[i] * D[i] * D[i]));
+    spotDot = dot(-LL, normalize(SpotDir[i].xyz));
+
+    if(spotDot < SpotAngle[i])
+      spotAttenuation = 0.0;
+    else
+      spotAttenuation = pow(spotDot, SpotExponent[i]);  
+
+    attenuation *= spotAttenuation;
+
+    HV = normalize(LL+EE); // half vector
+    nDotLL = max(0.0, dot(NN,LL));
+    nDotHV = max(0.0, dot(NN,HV));
+
+    if(nDotLL==0.0)
+      pf = 0.0;
+    else
+      pf = pow(nDotHV, MaterialShininess);
+
+    ambient = LightAmbient[i] * MaterialAmbient * attenuation;
+    diffuse = LightDiffuse[i] * MaterialDiffuse * nDotLL * attenuation;
+    specular = LightSpecular[i] * MaterialSpecular * pf * attenuation;
+
+    //calc shadows
+    float shadowValue = 0.0;
+    vec4 lightVertexPosition2 = lightVertexPosition[i];
+    lightVertexPosition2 /= lightVertexPosition2.w;
+
+    float aa = mod((j-0.5),4.0);
+    float bb = floor((j-0.5)/4.0);
+    vec2 offset = vec2(0.25*aa,0.25*bb);
+
+    // softer shadowing by adding dither
+    for(float x=-0.0004; x<=0.0004; x+=0.0002) {
+      for(float y=-0.0004; y<=0.0004; y+=0.0002) {
+        if(texture2D(shadowMap,(lightVertexPosition2.xy*0.25)+offset+vec2(x,y)).r >= lightVertexPosition2.z)
+          shadowValue+=1.0;
+      }
+    }
+    shadowValue/=16.0;
+
+    if(IsTextured>0.5) {
+      vec4 texcolor = LightDiffuse[i] * texture2D(tex1,UVWCoord.xy) * nDotLL * attenuation;
+      outcolor += vec4((texcolor.xyz*shadowValue),1.0);
+    } else {
+      outcolor += vec4(((ambient + diffuse + specular).xyz*shadowValue),1.0);
+    }
+  }
+  float nl = numlights;
+  if(numlights<0.5) {
+    nl = 1.0;
+    float dotE = max(0.0, dot(NN,EE));
+    if(IsTextured>0.5) {
+      outcolor.xyz = texture2D(tex1,UVWCoord.xy).xyz*dotE;
+    }else{
+      outcolor.xyz = MaterialDiffuse.xyz*dotE;
+    }
+  }
+  gl_FragColor = vec4(outcolor.xyz/nl,1.0);
+}
+")
+
+(define xtmfrag_nolight
+  "
+//#version 120
+varying vec3 N, E, V;
+varying vec3 L[10];
+varying float D[10];
+
+uniform vec4 LightAmbient[10];
+uniform vec4 LightDiffuse[10];
+uniform vec4 LightSpecular[10];
+uniform float ConstantAttenuation[10];
+uniform float LinearAttenuation[10];
+uniform float QuadraticAttenuation[10];
+uniform float SpotAngle[10];
+uniform vec4 SpotDir[10];
+uniform float SpotExponent[10];
+
+uniform float numlights;
+
+uniform vec4 CameraDir;
+uniform float MaterialShininess;
+uniform vec4 MaterialAmbient;
+uniform vec4 MaterialDiffuse;
+uniform vec4 MaterialSpecular;
+
+uniform mat4 ModelMatrix;
+uniform mat4 ViewMatrix;
+uniform mat4 ProjectionMatrix;
+uniform mat4 NormalMatrix;
+uniform mat4 ModelViewMatrix;
+uniform mat4 ModelViewProjectionMatrix;
+
+uniform sampler2D shadowMap;
+uniform sampler2D tex1;
+uniform float IsTextured;
+
+varying vec4 lightVertexPosition[10];
+varying vec3 UVWCoord;
+varying vec4 Color;
+
+void main()
+{
+  vec4 outcolor = vec4(0.0);
+  float j = 0.5;
+  vec4 ambient,diffuse,specular;
+  vec3 HV;
+  float pf; // powerfactor
+  float nDotHV, nDotLL;
+  float attenuation, spotDot, spotAttenuation;
+  vec4 TexColor; // texture color
+
+  vec3 NN = normalize(N); // surface normal
+  vec3 EE = normalize(E); // eye vector
+  vec3 VV = normalize(V); // vertex 3d
+
+  float dotE = max(0.0, dot(NN,EE));
+  if(IsTextured>0.5) {
+    outcolor.xyz = texture2D(tex1,UVWCoord.xy).xyz*dotE;
+  }else{
+    outcolor.xyz = MaterialDiffuse.xyz*dotE;
+  }
+  gl_FragColor = vec4(outcolor.xyz,1.0);
+}
+")
+
+(define *xtmlib-shaders-loaded* #t)
+(print "done.\n")
 
 ;;; ASSIMP SETUP ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(if (defined? 'xtmlib_assimp_loaded)
-    (sys:load-escape "Sorry cannot load xtm standard lib: assimp already preloaded"))
+(sys:load-preload-check 'assimp)
 
 (define libassimp
   (let ((platform (sys:platform)))
@@ -1170,8 +1497,88 @@ else
         (null? libassimp))
     (sys:load-escape "Error loading assimp library"))
 
+(define *xtmlib-assimp-loaded* #f)
+(print "Loading assimp library...")
 
-(define xtmlib_assimp_loaded #t)
+(bind-val aiProcess_CalcTangentSpace i32 1)
+(bind-val aiProcess_JoinIdenticalVertices i32 2)
+(bind-val aiProcess_MakeLeftHanded i32 4)
+(bind-val aiProcess_Triangulate i32 8)
+(bind-val aiProcess_RemoveComponent i32 16)
+(bind-val aiProcess_GenNormals i32 32)
+(bind-val aiProcess_GenSmoothNormals i32 64)
+(bind-val aiProcess_SplitLargeMeshes i32 128)
+(bind-val aiProcess_PreTransformVertices i32 256)
+(bind-val aiProcess_LimitBoneWeights i32 512)
+(bind-val aiProcess_ValidateDataStructure i32 1024)
+(bind-val aiProcess_ImproveCacheLocality i32 2048)
+(bind-val aiProcess_RemoveRedundantMaterials i32 4096)
+(bind-val aiProcess_FixInfacingNormals i32 8192)
+(bind-val aiProcess_SortByPType i32 32768)
+(bind-val aiProcess_FindDegenerates i32 65536)
+(bind-val aiProcess_FindInvalidData i32 131072)
+(bind-val aiProcess_GenUVCoords i32 262144)
+(bind-val aiProcess_TransformUVCoords i32 524288)
+(bind-val aiProcess_FindInstances i32 1048576)
+(bind-val aiProcess_OptimizeMeshes i32 2097152)
+(bind-val aiProcess_OptimizeGraph i32 4194304)
+(bind-val aiProcess_FlipUVs i32 8388608)
+(bind-val aiProcess_FlipWindingOrder i32 16777216)
+(bind-val aiProcess_SplitByBoneCount i32 33554432)
+(bind-val aiProcess_Debone i32 67108864)
+
+(define  aiProcess_CalcTangentSpace  1)
+(define  aiProcess_JoinIdenticalVertices  2)
+(define  aiProcess_MakeLeftHanded  4)
+(define  aiProcess_Triangulate  8)
+(define  aiProcess_RemoveComponent  16)
+(define  aiProcess_GenNormals  32)
+(define  aiProcess_GenSmoothNormals  64)
+(define  aiProcess_SplitLargeMeshes  128)
+(define  aiProcess_PreTransformVertices  256)
+(define  aiProcess_LimitBoneWeights  512)
+(define  aiProcess_ValidateDataStructure  1024)
+(define  aiProcess_ImproveCacheLocality  2048)
+(define  aiProcess_RemoveRedundantMaterials  4096)
+(define  aiProcess_FixInfacingNormals  8192)
+(define  aiProcess_SortByPType  32768)
+(define  aiProcess_FindDegenerates  65536)
+(define  aiProcess_FindInvalidData  131072)
+(define  aiProcess_GenUVCoords  262144)
+(define  aiProcess_TransformUVCoords  524288)
+(define  aiProcess_FindInstances  1048576)
+(define  aiProcess_OptimizeMeshes  2097152)
+(define  aiProcess_OptimizeGraph  4194304)
+(define  aiProcess_FlipUVs  8388608)
+(define  aiProcess_FlipWindingOrder  16777216)
+(define  aiProcess_SplitByBoneCount  33554432)
+(define  aiProcess_Debone 67108864)
+(ipc:define "utility"  'aiProcess_CalcTangentSpace  1)
+(ipc:define "utility"  'aiProcess_JoinIdenticalVertices  2)
+(ipc:define "utility"  'aiProcess_MakeLeftHanded  4)
+(ipc:define "utility"  'aiProcess_Triangulate  8)
+(ipc:define "utility"  'aiProcess_RemoveComponent  16)
+(ipc:define "utility"  'aiProcess_GenNormals  32)
+(ipc:define "utility"  'aiProcess_GenSmoothNormals  64)
+(ipc:define "utility"  'aiProcess_SplitLargeMeshes  128)
+(ipc:define "utility"  'aiProcess_PreTransformVertices  256)
+(ipc:define "utility"  'aiProcess_LimitBoneWeights  512)
+(ipc:define "utility"  'aiProcess_ValidateDataStructure  1024)
+(ipc:define "utility"  'aiProcess_ImproveCacheLocality  2048)
+(ipc:define "utility"  'aiProcess_RemoveRedundantMaterials  4096)
+(ipc:define "utility"  'aiProcess_FixInfacingNormals  8192)
+(ipc:define "utility"  'aiProcess_SortByPType  32768)
+(ipc:define "utility"  'aiProcess_FindDegenerates  65536)
+(ipc:define "utility"  'aiProcess_FindInvalidData  131072)
+(ipc:define "utility"  'aiProcess_GenUVCoords  262144)
+(ipc:define "utility"  'aiProcess_TransformUVCoords  524288)
+(ipc:define "utility"  'aiProcess_FindInstances  1048576)
+(ipc:define "utility"  'aiProcess_OptimizeMeshes  2097152)
+(ipc:define "utility"  'aiProcess_OptimizeGraph  4194304)
+(ipc:define "utility"  'aiProcess_FlipUVs  8388608)
+(ipc:define "utility"  'aiProcess_FlipWindingOrder  16777216)
+(ipc:define "utility"  'aiProcess_SplitByBoneCount  33554432)
+(ipc:define "utility"  'aiProcess_Debone 67108864)
 
 (bind-type aiString <size_t,|1024,i8|>)
 (bind-type aiMatrix4x4 <float,float,float,float,float,float,float,float,float,float,float,float,float,float,float,float>)
@@ -1202,11 +1609,12 @@ else
 (bind-type aiLight <aiString,i32,aiVector3D,aiVector3D,float,float,float,aiColor3D,aiColor3D,aiColor3D,float,float>) ;; good
 (bind-type aiCamera <aiString,aiVector3D,aiVector3D,aiVector3D,float,float,float,float>) ;; good
 (bind-type aiScene <i32,aiNode*,i32,aiMesh**,i32,aiMaterial**,i32,aiAnimation**,i32,aiTexture**,i32,aiLight**,i32,aiCamera**,i8*>) ;; good
-
-(bind-type ai_mesh <E_vbo*,i32,float*,float*,float*,float*,float,float,i32>)
-(bind-type ai_node <i8*,float*,ai_node*,i32,ai_node*,i32,ai_mesh*>)
+(bind-type aiExportFormatDesc <i8*,i8*,i8*>)
 
 (bind-lib libassimp aiImportFile [aiScene*,i8*,i32]*)
+(bind-lib libassimp aiExportScene [i32,aiScene*,i8*,i8*,i32]*)
+(bind-lib libassimp aiGetExportFormatCount [size_t]*)
+(bind-lib libassimp aiGetExportFormatDescription [aiExportFormatDesc*,size_t]*)
 (bind-lib libassimp aiReleaseImport [void,aiScene*]*)
 (bind-lib libassimp aiIdentityMatrix4 [void,aiMatrix4x4*]*)
 (bind-lib libassimp aiMultiplyMatrix4 [void,aiMatrix4x4*,aiMatrix4x4*]*)
@@ -1232,26 +1640,180 @@ else
 (bind-lib-func stdlib ai_color4_to_float4 [i64,aiColor4D*,float*]*)
 (bind-lib-func stdlib ai_apply_material [void,aiMaterial*,i32]*)
 (bind-lib-func stdlib ai_build_mesh_vbo [E_vbo*,aiMesh*,i32*]*)
-(bind-lib-func stdlib ai_build_mesh [void,aiScene*,aiMesh*,ai_mesh*,i8*]*)
-(bind-lib-func stdlib ai_build_node [void,aiScene*,aiNode*,ai_node*,ai_node*,i8*]*)
-(bind-lib-func stdlib ai_build_scene [ai_node*,aiScene*,i8*]*)
-(bind-lib-func stdlib assimp_load_asset [ai_node*,i8*,i8*]*)
-(bind-lib-func stdlib assimp_draw_mesh [void,ai_mesh*,i32]*)
-(bind-lib-func stdlib assimp_draw_node [void,ai_node*,i32,float*,float*,float*,float*]*)
-(bind-lib-func stdlib assimp_draw_model [void,ai_node*,i32,float*,float*,float*,float*]*)
+(bind-lib-func stdlib ai_build_mesh [void,aiScene*,aiMesh*,xtm_mesh*,i8*]*)
+(bind-lib-func stdlib ai_build_node [void,aiScene*,aiNode*,xtm_node*,xtm_node*,i8*]*)
+(bind-lib-func stdlib ai_build_scene [xtm_node*,aiScene*,i8*]*)
+(bind-lib-func stdlib assimp_load_model_a [xtm_node*,i8*,i8*,i32]*)
+(bind-lib-func stdlib assimp_load_model_b [xtm_node*,i8*,i8*]*)
+;; (bind-lib-func stdlib assimp_draw_mesh [void,xtm_mesh*,i32]*)
+(bind-lib-func stdlib assimp_draw_node [void,xtm_node*,i32,float*,float*,float*,i32,float*]*)
+(bind-lib-func stdlib assimp_draw_model [void,xtm_node*,i32,float*,float*,float*,i32,float*]*)
 (bind-lib-func stdlib ai_load_textures [void,aiScene*]*)
+(bind-lib-func stdlib ai_print_export_formats [void]*)
+(bind-lib-func stdlib ai_convert [void,i8*,i8*,i8*,i32]*)
 
-(println 'ASSIMP 'LOADED)
+
+(bind-poly assimp_load_model assimp_load_model_a)
+(bind-poly assimp_load_model assimp_load_model_b)
+
+;; poly has no binding for scheme
+(define assimp_load_model
+  (lambda (dir file . args)
+    (if (null? args)
+        (assimp_load_model_b dir file)
+        (assimp_load_model_a dir file (car args)))))
+
+(define *xtmlib-assimp-loaded* #t)
+(print "done.\n")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OpenVG setup
+(sys:load-preload-check 'openvg)
+
+(define libopenvg
+  (let ((platform (sys:platform)))
+    (cond ((string=? platform "Linux") (sys:open-dylib "libOpenVG.so"))
+	  ((string=? platform "Windows") (sys:open-dylib "libOpenVG.dll"))
+	  ((string=? platform "OSX") (sys:open-dylib "libOpenVG.dylib"))
+	  (else (sys:load-escape "Unknown platform for OpenVG lib")))))
+
+(if (null? libopenvg)
+    (sys:load-escape "Could not load OpenVG\n"))
+
+(define *xtmlib-openvg-loaded* #f)
+(print "Loading openvg library...")
+
+(bind-alias VGboolean i32)
+(bind-alias VGint i32)
+(bind-alias VGuint i32)
+(bind-alias VGbitfield i32)
+(bind-alias VGfloat float)
+(bind-alias VGbyte i8)
+(bind-alias VGubyte i8)
+(bind-alias VGshort i16)
+
+(bind-alias VGHandle i8*)
+(bind-alias VGPath i8*)
+(bind-alias VGPaint i8*)
+(bind-alias VGImage i8*)
+
+;; enums
+(bind-alias VGPathDatatype enum)
+
+(bind-alias VGPathCapabilities enum)
+
+(bind-alias VGPathAbsRel enum)
+(bind-alias VGPathSegment enum)
+(bind-alias VGPaintMode enum)
+(bind-alias VGErrorCode enum)
+(bind-alias VGParamType enum)
+(bind-alias VGPaintParamType enum)
+(bind-alias VGPaintType enum)
+(bind-alias VGMatrixMode enum)
+(bind-alias VGImageFormat enum)
+(bind-alias VGBlendMode enum)
+(bind-alias VGImageMode enum)
+(bind-alias VGRenderingQuality enum)
+
+(bind-lib libopenvg vgCreateContextSH [VGboolean,VGint,VGint]*)
+(bind-lib libopenvg vgCreatePath [VGPath,VGint,VGPathDatatype,VGfloat,VGfloat,VGint,VGint,VGbitfield]*)
+(bind-lib libopenvg vgClearPath [void,VGPath,VGbitfield]*)
+(bind-lib libopenvg vgDestroyPath [void,VGPath]*)
+(bind-lib libopenvg vgClear [void,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgAppendPath [void,VGPath,VGPath]*)
+(bind-lib libopenvg vgAppendPathData [void,VGPath,VGint,VGubyte*,i8*]*)
+(bind-lib libopenvg vgDrawPath [void,VGPath,VGbitfield]*)
+(bind-lib libopenvg vgPathBounds [void,VGPath,VGfloat*,VGfloat*,VGfloat*,VGfloat*]*)
+(bind-lib libopenvg vgCreatePaint [VGPaint]*)
+(bind-lib libopenvg vgDestroyPaint [void,VGPaint]*)
+(bind-lib libopenvg vgSetPaint [void,VGPaint,VGbitfield]*)
+;; (bind-lib libopenvg vgSetColor [void,VGPaint,VGuint]*)
+(bind-lib libopenvg vgSetfv [void,VGParamType,VGint,VGfloat*]*)
+(bind-lib libopenvg vgSetiv [void,VGParamType,VGint,VGint*]*)
+(bind-lib libopenvg vgSeti [void,VGParamType,VGint]*)
+(bind-lib libopenvg vgSetf [void,VGParamType,VGfloat]*)
+(bind-lib libopenvg vgLoadIdentity [void]*)
+(bind-lib libopenvg vgTranslate [void,VGfloat,VGfloat]*)
+(bind-lib libopenvg vgScale [void,VGfloat,VGfloat]*)
+(bind-lib libopenvg vgRotate [void,VGfloat]*)
+(bind-lib libopenvg vgSetParameterfv [void,VGHandle,VGint,VGint,VGfloat*]*)
+(bind-lib libopenvg vgSetParameteri [void,VGHandle,VGint,VGint]*)
+(bind-lib libopenvg vgGetError [VGErrorCode]*)
+(bind-lib libopenvg vgCreateImage [VGImage,VGImageFormat,VGint,VGint,VGbitfield]*)
+(bind-lib libopenvg vgImageSubData [void,VGImage,i8*,VGint,VGImageFormat,VGint,VGint,VGint,VGint]*)
+(bind-lib libopenvg vgDrawImage [void,VGImage]*)
+(bind-lib libopenvg vguLine [VGErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat]*)
+(bind-lib libopenvg vguEllipse [VGErrorCode,VGPath,VGfloat,VGfloat,VGfloat,VGfloat]*)
+
+(define *xtmlib-openvg-loaded* #t)
+(print "done.\n")
+
+;; libOpenVG
+(bind-lib-val stdlib VG_FALSE i32)
+(bind-lib-val stdlib VG_TRUE i32)
+(bind-lib-val stdlib VG_PATH_FORMAT_STANDARD i32)
+(bind-lib-val stdlib VG_PATH_DATATYPE_F i32)
+(bind-lib-val stdlib VG_ABSOLUTE i32)
+(bind-lib-val stdlib VG_RELATIVE i32)
+(bind-lib-val stdlib VG_PATH_CAPABILITY_ALL i32)
+(bind-lib-val stdlib VG_CLOSE_PATH i32)
+(bind-lib-val stdlib VG_MOVE_TO i32)
+(bind-lib-val stdlib VG_LINE_TO i32)
+(bind-lib-val stdlib VG_HLINE_TO i32)
+(bind-lib-val stdlib VG_VLINE_TO i32)
+(bind-lib-val stdlib VG_QUAD_TO i32)
+(bind-lib-val stdlib VG_CUBIC_TO i32)
+(bind-lib-val stdlib VG_SCUBIC_TO i32)
+(bind-lib-val stdlib VG_SCCWARC_TO i32)
+(bind-lib-val stdlib VG_SCWARC_TO i32)
+(bind-lib-val stdlib VG_LCCWARC_TO i32)
+(bind-lib-val stdlib VG_LCWARC_TO i32)
+(bind-lib-val stdlib VG_STROKE_PATH i32)
+(bind-lib-val stdlib VG_FILL_PATH i32)
+(bind-lib-val stdlib VG_NO_ERROR i32)
+(bind-lib-val stdlib VG_MATRIX_MODE i32)
+(bind-lib-val stdlib VG_FILL_RULE i32)
+(bind-lib-val stdlib VG_IMAGE_QUALITY i32)
+(bind-lib-val stdlib VG_RENDERING_QUALITY i32)
+(bind-lib-val stdlib VG_BLEND_MODE i32)
+(bind-lib-val stdlib VG_IMAGE_MODE i32)
+(bind-lib-val stdlib VG_PAINT_TYPE i32)
+(bind-lib-val stdlib VG_PAINT_COLOR i32)
+(bind-lib-val stdlib VG_PAINT_TYPE_COLOR i32)
+(bind-lib-val stdlib VG_PAINT_TYPE_LINEAR_GRADIENT i32)
+(bind-lib-val stdlib VG_PAINT_TYPE_RADIAL_GRADIENT i32)
+(bind-lib-val stdlib VG_PAINT_TYPE_PATTERN i32)
+(bind-lib-val stdlib VG_CLEAR_COLOR i32)
+(bind-lib-val stdlib VG_STROKE_LINE_WIDTH i32)
+(bind-lib-val stdlib VG_MATRIX_PATH_USER_TO_SURFACE i32)
+(bind-lib-val stdlib VG_MATRIX_IMAGE_USER_TO_SURFACE i32)
+(bind-lib-val stdlib VG_MATRIX_FILL_PAINT_TO_USER i32)
+(bind-lib-val stdlib VG_MATRIX_STROKE_PAINT_TO_USER i32)
+(bind-lib-val stdlib VG_sRGBX_8888 i32)
+(bind-lib-val stdlib VG_sRGBA_8888 i32)
+(bind-lib-val stdlib VG_sRGBA_8888_PRE i32)
+(bind-lib-val stdlib VG_lRGBX_8888 i32)
+(bind-lib-val stdlib VG_lRGBA_8888 i32)
+(bind-lib-val stdlib VG_lRGBA_8888_PRE i32)
+(bind-lib-val stdlib VG_lARGB_8888 i32)
+(bind-lib-val stdlib VG_BLEND_SRC i32)
+(bind-lib-val stdlib VG_DRAW_IMAGE_NORMAL i32)
+(bind-lib-val stdlib VG_DRAW_IMAGE_MULTIPLY i32)
+(bind-lib-val stdlib VG_DRAW_IMAGE_STENCIL i32)
+(bind-lib-val stdlib VG_RENDERING_QUALITY_BETTER i32)
+(bind-lib-val stdlib VG_IMAGE_QUALITY_BETTER i32)
+(bind-lib-func stdlib vgCreateContext [i32,i32,i32]*)
+(bind-lib-func stdlib xtm_create_vgpath [i8*]*)
+(bind-lib-func stdlib xtm_create_vgimage [i8*,i8*]*)
 
 
 ;;; AUDIO SETUP ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (load "libs/core/pc_ivl.xtm")
 
-(if (defined? 'xtmlib_audio_loaded)
-    (sys:load-escape "Sorry cannot load xtm standard lib: audio already preloaded"))
-
-(define xtmlib_audio_loaded #t)
+(sys:load-preload-check 'audio-inst-ext)
+(define *xtmlib-audio-inst-ext-loaded* #f)
+(print "Loading audio-inst-ext library...\n")
 
 (bind-alias DSP [double,double,double,double,double*]*)
 
@@ -1315,16 +1877,25 @@ else
           ((string=? platform "OSX") (sys:open-dylib "libsndfile.dylib"))
           (else (print "Unknown platform: " platform)))))
 
+(if (or (eq? #f libsndfile)
+        (null? libsndfile))
+    (sys:load-escape "Error loading libsndfile dynamic library"))
+
+(define *xtmlib-sndfile-loaded* #f)
+
 (bind-type sf_info <i64,i32,i32,i32,i32,i32>)
 (bind-type sf_format_info <i32,i8*,i8*>)
 
 (bind-lib libsndfile sf_open [i8*,i8*,i32,sf_info*]*)
+(bind-lib libsndfile sf_open_fd [i8*,i32,i32,sf_info*,i32]*)
 (bind-lib libsndfile sf_close [i32,i8*]*)
 (bind-lib libsndfile sf_seek [i64,i8*,i64,i32]*)
 (bind-lib libsndfile sf_write_sync [void,i8*]*)
 (bind-lib libsndfile sf_read_double [i64,i8*,double*,i64]*)
 (bind-lib libsndfile sf_write_double [i64,i8*,double*,i64]*)
 (bind-lib libsndfile sf_strerror [i8*,i8*]*)
+
+(define *xtmlib-sndfile-loaded* #t)
 
 
 ;; then bind the rest of the closures
@@ -1347,6 +1918,8 @@ else
 (bind-lib-func stdlib pink_c [[double]*]*)
 (bind-lib-func stdlib pulse_c [[double,double,double,double]*]*)
 (bind-lib-func stdlib pulse_mc_c [[double,double,double,double,double]*]*)
+(bind-lib-func stdlib fade_c [[double,double,double,double]*]*)
+(bind-lib-func stdlib fade_mc_c [[double,double,double,double,double]*]*)
 (bind-lib-func stdlib delay_old_c [[double,double]*,i64]*)
 (bind-lib-func stdlib delay_c [[double,double,double,double]*,double]*)
 (bind-lib-func stdlib delay_mc_c [[double,double,double,double,double]*,i64,double]*)
@@ -1414,7 +1987,6 @@ else
 (bind-lib-func stdlib adsr_c [[double,double]*,double,double,double,double,double,double,double]*)
 (bind-lib-func stdlib adsr_accum_c [[double,double,double]*,double,double,double,double,double,double,double]*)
 (bind-lib-func stdlib hermite_interp [double,double,double,double,double,double]*)
-(bind-lib-func stdlib fade_c [[double,double,double]*,double]*)
 (bind-lib-func stdlib midi2frq [double,double]*)
 (bind-lib-func stdlib frq2midi [double,double]*)
 (bind-lib-func stdlib note_c [[double,double,double,double]*,double,double,double,double,double,double,double,double,double*,i64,[double,double,double,double,double]*,mzone*]*)
@@ -1438,13 +2010,16 @@ else
 (bind-lib-func stdlib shimmer_pad [double,double,double,double,double*]*)
 (bind-lib-func stdlib simplefm_note_c [[double,double,double,double,double]*,i64,double*]*)
 (bind-lib-func stdlib simplefm_fx [double,double,double,double,double*]* 700000)
-(bind-lib-func stdlib simplefm [double,double,double,double,double*]*)
+(bind-lib-func stdlib fmsynth [double,double,double,double,double*]*)
 (bind-lib-func stdlib fmpad_note_c [[double,double,double,double,double]*,i64,double*]*)
 (bind-lib-func stdlib fmpad_fx [double,double,double,double,double*]* 700000)
 (bind-lib-func stdlib fmpad [double,double,double,double,double*]*)
 (bind-lib-func stdlib sawbass_note_c [[double,double,double,double,double]*,i64,double*]*)
 (bind-lib-func stdlib sawbass_fx [double,double,double,double,double*]* 700000)
 (bind-lib-func stdlib sawbass [double,double,double,double,double*]*)
+(bind-lib-func stdlib subbass_note_c [[double,double,double,double,double]*,i64,double*]*)
+(bind-lib-func stdlib subbass_fx [double,double,double,double,double*]* 100000)
+(bind-lib-func stdlib subbass [double,double,double,double,double*]*)
 (bind-lib-func stdlib sf_frames [i64,sf_info*]*)
 (bind-lib-func stdlib sf_samplerate [i64,sf_info*]*)
 (bind-lib-func stdlib sf_channels [i64,sf_info*]*)
@@ -1456,29 +2031,54 @@ else
 (bind-lib-func stdlib audiofile_c [[double]*,i8*,i64,i64]*)
 (bind-lib-func stdlib audiofile_ptr_c [[double*]*,i8*,i64,i64]*)
 (bind-lib-func stdlib write_audio_data [i64,i8*,i64,i32,double*]*)
+;; external/instruments
 (bind-lib-func stdlib set_sample_data_ [i64,[double,double,double,double*]*,i8*,i64,i64,i64]*)
 (bind-lib-func stdlib set_sample_offset_ [i64,[double,double,double,double*]*,i64,i64]*)
 (bind-lib-func stdlib sampler_note_linear_c [[double,double,double,double,double]*,|128,double*|*,|128,i64|*,|128,i64|*,i64,double]*)
 (bind-lib-func stdlib sampler_note_hermite_c [[double,double,double,double,double]*,|128,double*|*,|128,i64|*,|128,i64|*,|128,i64|*,i64,double]*)
-(bind-lib-func stdlib sampler_fx [double,double,double,double,double*]* 700000)
-(bind-lib-func stdlib drums_fx [double,double,double,double,double*]* 700000)
+(bind-lib-func stdlib sampler1_fx [double,double,double,double,double*]* 700000)
+(bind-lib-func stdlib sampler2_fx [double,double,double,double,double*]* 700000)
+(bind-lib-func stdlib sampler3_fx [double,double,double,double,double*]* 700000)
+(bind-lib-func stdlib sampler1 [double,double,double,double,double*]*)
+(bind-lib-func stdlib sampler2 [double,double,double,double,double*]*)
+(bind-lib-func stdlib sampler3 [double,double,double,double,double*]*)
 
+;; (define-macro (play-note time inst pitch vol dur . args)  
+;;   (let ((nargs (length args)))
+;;     `(let ((duration (* 1.0 ,dur))
+;;            (dargs (sys:make-cptr ,(* 8 nargs))) ;; doubles
+;;            (native (llvm:get-native-closure ,(symbol->string inst))))
+;;        (dotimes (i ,nargs) (cptr:set-double dargs (* i 8) (eval (list-ref ',args i))))
+;;        (if (cptr? native)
+;;            (_play_note (integer->real ,time)
+;;                        native
+;;                        (midi2frq (* 1.0 ,pitch))
+;;                        (/ (exp (/ ,vol 26.222)) 127.0)
+;;                        duration
+;;                        ,nargs
+;;                        dargs)
+;;            (print-error 'No 'inst 'named ,(symbol->string inst))))))
 
-(define-macro (play-note time inst pitch vol dur . args)  
-  (let ((nargs (length args)))
-    `(let ((duration (* 1.0 ,dur))
-           (dargs (sys:make-cptr ,(* 8 nargs))) ;; doubles
-           (native (llvm:get-native-closure ,(symbol->string inst))))
-       (dotimes (i ,nargs) (cptr:set-double dargs (* i 8) (eval (list-ref ',args i))))
-       (if (cptr? native)
-           (_play_note (integer->real ,time)
-                       native
-                       (midi2frq (* 1.0 ,pitch))
-                       (/ (exp (/ ,vol 26.222)) 127.0)
-                       duration
-                       ,nargs
-                       dargs)
-           (print-error 'No 'inst 'named ,(symbol->string inst))))))
+(define play-note
+  (lambda (time inst pitch vol dur . args)
+    (let ((nargs (length args)))
+      (let ((duration (* 1.0 dur))
+            (dargs (sys:make-cptr (* 8 nargs))) ;; doubles
+            (native (if (procedure? inst)
+                        (llvm:get-native-closure (llvm:ffi-get-name inst))
+                        (llvm:get-native-closure (if (symbol? inst)
+                                                     (symbol->string inst)
+                                                     inst)))))
+        (dotimes (i nargs) (cptr:set-double dargs (* i 8) (eval (list-ref args i))))
+        (if (cptr? native)
+            (_play_note (integer->real time)
+                        native
+                        (midi2frq (* 1.0 pitch))
+                        (/ (exp (/ vol 26.222)) 127.0)
+                        duration
+                        nargs
+                        dargs)
+            (print-error 'No 'inst 'named (symbol->string inst)))))))
 
 
 ;; the play macro
@@ -1606,19 +2206,32 @@ else
                            (real->integer ,offset)
                            (real->integer ,lgth)))))
 
+
+;; passing a length of 0 will read the whole file
+(define-macro (set-sampler-index inst fname index offset lgth)
+  `(let ((native (llvm:get-native-closure ,(symbol->string inst))))
+     (if (and (cptr? native)
+              (> ,index 0)
+              (< ,index 128))
+         (set_sample_data_ native
+                           ,fname
+                           (real->integer ,index)
+                           (real->integer ,offset)
+                           (real->integer ,lgth)))))
+
 ;; (set-sample-offset sampler 60 50000)
 ;; this would offset the sample at index 60 by 50000 samples
-(define-macro (set-sample-offset inst index offset)
-  `(let ((native (llvm:get-native-closure ,(symbol->string inst))))
-     (if (cptr? native)
-	 (set_sample_offset_ native
-			     (real->integer ,index)
-			     (real->integer ,offset)))))
+;; (define-macro (set-sample-offset inst index offset)
+;;   `(let ((native (llvm:get-native-closure ,(symbol->string inst))))
+;;      (if (cptr? native)
+;; 	 (set_sample_offset_ native
+;; 			     (real->integer ,index)
+;; 			     (real->integer ,offset)))))
 
 
 (define note-name-to-midi-number
   (lambda (name)
-    (let ((result (regex:matched name "([ABCDEFG])([#b])?(-?[0-9])")))
+    (let ((result (regex:matched name "([abcdefgABCDEFG])([#b])?(-?[0-9])")))
         (if (null? result)
             #f
             (let ((offset (+ 12 (* (string->number (cadddr result)) 12)))
@@ -1633,7 +2246,7 @@ else
 (define parse-sample-names-1
   (lambda (file-list)
     (map (lambda (fname)
-           (let ((result (regex:matched fname "([0-9]*)\.(wav|aif|aiff|ogg)$")))
+           (let ((result (regex:matched fname "([0-9]*)\.(wav|WAV|aif|AIF|aiff|AIFF|ogg|OGG)$")))
              (if (null? result)
                  (begin (println 'Error: 'cannot 'parse 'filename: fname)
                         #f)
@@ -1647,7 +2260,7 @@ else
 (define parse-sample-names-2
   (lambda (file-list)
     (map (lambda (fname)
-           (let ((result (regex:matched fname "^.*([ABCDEFG][#b]?[0-9]).*\.(wav|aif|aiff|ogg)$")))
+           (let ((result (regex:matched fname "^.*([abcdefgABCDEFG][#b]?[0-9]).*\.(wav|WAV|aif|AIF|aiff|AIFF|ogg|OGG)$")))
              (if (null? result)
                  (begin (println 'Error: 'cannot 'parse 'filename: fname)
                         #f)
@@ -1660,7 +2273,8 @@ else
 
 ;; must be stereo samples of type wav aif or ogg
 (define-macro (load-sampler sampler path . args)
-  (let ((parser (if (null? args) 'parse-sample-names-1 (car args))))
+  (let ((parser (if (null? args) 'parse-sample-names-1 (car args)))
+        (midioffset (if (= (length args) 2) (cadr args) 0)))
     `(let ((file-list (sys:directory-list ,path)))
        (for-each (lambda (samp-data)
                    (if samp-data
@@ -1668,7 +2282,7 @@ else
                                           (if (string=? (sys:platform) "Windows")
                                               (car samp-data)
                                               (string-append ,path "/" (car samp-data)))
-                                          (cadr samp-data)
+                                          (+ ,midioffset (cadr samp-data))
                                           (caddr samp-data)
                                           (cadddr samp-data))))
                  (,parser file-list)))))
@@ -1679,7 +2293,8 @@ else
 (define ipc:audio-setup
   (lambda (proc)
     (ipc:eval-string proc
-                     "(define-macro (play-note time inst pitch vol dur . args)  
+                      ";;old play-note
+                      (define-macro (play-note time inst pitch vol dur . args)  
                        (let ((nargs (length args)))
                          `(let ((duration (* 1.0 ,dur))
                                 (dargs (sys:make-cptr ,(* 8 nargs))) ;; doubles
@@ -1694,6 +2309,27 @@ else
                                             ,nargs
                                             dargs)
                                 (print-error 'No 'inst 'named ,(symbol->string inst))))))
+                      ;; new playnote
+                      (define play-note
+                        (lambda (time inst pitch vol dur . args)
+                          (let ((nargs (length args)))
+                            (let ((duration (* 1.0 dur))
+                                  (dargs (sys:make-cptr (* 8 nargs))) ;; doubles
+                                  (native (if (procedure? inst)
+                                              (llvm:get-native-closure (llvm:ffi-get-name inst))
+                                              (llvm:get-native-closure (if (symbol? inst)
+                                                                           (symbol->string inst)
+                                                                           inst)))))
+                              (dotimes (i nargs) (cptr:set-double dargs (* i 8) (eval (list-ref args i))))
+                              (if (cptr? native)
+                                  (_play_note (integer->real time)
+                                              native
+                                              (midi2frq (* 1.0 pitch))
+                                              (/ (exp (/ vol 26.222)) 127.0)
+                                              duration
+                                              nargs
+                                              dargs)
+                                  (print-error 'No 'inst 'named (symbol->string inst)))))))
                      ;; passing a length of 0 will read the whole file
                      (define-macro (set-sampler-index inst fname index offset lgth)
                        `(let ((native (llvm:get-native-closure ,(symbol->string inst))))
@@ -1703,18 +2339,44 @@ else
                                                 (real->integer ,index)
                                                 (real->integer ,offset)
                                                 (real->integer ,lgth)))))
+                     ;; note name to midi num
+                     (define note-name-to-midi-number
+                       (lambda (name)
+                         (let ((result (regex:matched name \"([abcdefgABCDEFG])([#b])?(-?[0-9])\")))
+                           (if (null? result)
+                               #f
+                               (let ((offset (+ 12 (* (string->number (cadddr result)) 12)))
+                                     (pc (case (modulo (- (modulo (char->integer (car (string->list (cadr result)))) 16) 3) 7)
+                                           ((0) 0) ((1) 2) ((2) 4) ((3) 5) ((4) 7) ((5) 9) ((6) 11))))
+                                 (+ offset pc
+                                    (cond ((string=? (caddr result) \"#\") 1)
+                                          ((string=? (caddr result) \"b\") -1)
+                                          (else 0))))))))
                      ;; this will match e.g. 60.aiff (where 60 is the midi note number)
                      (define parse-sample-names-1
                        (lambda (file-list)
                          (map (lambda (fname)
-                                (let ((result (regex:matched fname \"([0-9]*)\.(wav|aif|aiff|ogg)$\")))
+                                (let ((result (regex:matched fname \"([0-9]*)\.(wav|WAV|aif|AIF|aiff|AIFF|ogg|OGG)$\")))
                                   (if (null? result)
                                       (begin (println 'Error: 'cannot 'parse 'filename: fname)
                                              #f)
-                                      (list fname                          
-                                            (string->number (cadr result)) 
-                                            0                              
-                                            0))))                          
+                                      (list fname                          ; filename    
+                                            (string->number (cadr result)) ; midi note number
+                                            0                              ; offset
+                                            0))))                          ; length (0 for whole sample)
+                              file-list)))
+                     ;; this will match e.g. Eb3.aiff (representing E flat 3)
+                     (define parse-sample-names-2
+                       (lambda (file-list)
+                         (map (lambda (fname)
+                                (let ((result (regex:matched fname \"^.*([abcdefgABCDEFG][#b]?[0-9]).*\.(wav|WAV|aif|AIF|aiff|AIFF|ogg|OGG)$\")))
+                                  (if (null? result)
+                                      (begin (println 'Error: 'cannot 'parse 'filename: fname)
+                                             #f)
+                                      (list fname                                    ; filename                   
+                                            (note-name-to-midi-number (cadr result)) ; midi note number           
+                                            0                                        ; offset                     
+                                            0))))                                    ; length (0 for whole sample)
                               file-list)))
                      ;; must be stereo samples of type wav aif or ogg
                      (define-macro (load-sampler sampler path . args)
@@ -1751,13 +2413,19 @@ else
 
 ;; (ipc:audio-setup "utility")
 
-(define xtmlib_audioinst_loaded #t)
-(define xtmlib_audioinstx_loaded #t)
+;;;;;;;
+;; setup some instrument parameters
 
-(println 'AUDIO 'LOADED)
+(subbass.attack 500.0)
+(subbass.decay 500.0)
+(subbass.sustain 0.8)
+(subbass.release 500.0)
+
+(define *xtmlib-audio-inst-ext-loaded* #t)
+(print "audio-inst-ext library loaded.\n")
 
 (suppress-compiler-messages #f)
 
-(println)
-(println 'Finished 'loading 'xtm 'standard 'lib)
-(println)
+(print "\n*** xtm standard library loaded successfully ***\n\n")
+
+(define *xtmlib-stdlib-loaded* #t)
