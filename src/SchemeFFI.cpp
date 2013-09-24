@@ -431,13 +431,19 @@ namespace extemp {
 	    { "sys:platform",		&SchemeFFI::platform },
 	    { "sys:cmdarg",		&SchemeFFI::cmdarg },
 	    { "sys:open-dylib",		&SchemeFFI::openDynamicLib },
-	    { "sys:close-dylib",		&SchemeFFI::closeDynamicLib },
+	    { "sys:close-dylib",	&SchemeFFI::closeDynamicLib },
+	    { "sys:symbol-cptr",	&SchemeFFI::symbol_pointer },
 	    { "sys:make-cptr",		&SchemeFFI::makeCptr },
 	    { "sys:directory-list",     &SchemeFFI::dirlist },
+            { "sys:expand-path",           &SchemeFFI::pathExpansion },
 
 	    // DSP sys stuff
 	    { "sys:set-dsp-closure",	&SchemeFFI::setDSPClosure },
+	    { "sys:set-dspmt-closure",	&SchemeFFI::setDSPMTClosure },
 	    { "sys:set-dsp-wrapper",	&SchemeFFI::setDSPWrapper },
+	    { "sys:set-dspmt-wrapper",	&SchemeFFI::setDSPMTWrapper },
+            { "sys:init-mt-audio",      &SchemeFFI::initMTAudio },
+            { "sys:audio-load",         &SchemeFFI::getAudioLoad },
 	    { "sys:set-dsp-wrapper-array",	&SchemeFFI::setDSPWrapperArray },
 
 	    // memory zone stuff
@@ -698,6 +704,27 @@ namespace extemp {
          memset(ptr,0,num_bytes);                            
          return mk_cptr(_sc, ptr);                           
     }                                                     
+
+  pointer SchemeFFI::pathExpansion(scheme* _sc, pointer args) {    
+    char exp_path[1024];
+    memset(exp_path,0,1024);
+  #ifdef TARGET_OS_WIN
+    char* path = string_value(pair_car(args));
+    char* exp_path = path;
+  #else
+    char* path = string_value(pair_car(args));
+    if(path[0] == '~') {
+      char* h = getenv("HOME");      
+      strcpy(exp_path,h);
+      strcat(exp_path,&path[1]);
+    }else{
+      realpath(path,exp_path);
+    }
+    
+  #endif  
+    return mk_string(_sc,exp_path);
+  }
+
 
 #ifdef EXT_BOOST
 	pointer SchemeFFI::dirlist(scheme* _sc, pointer args)
@@ -2677,6 +2704,22 @@ namespace extemp {
 	printf("%s",str.c_str());
 	return _sc->T;		
     }
+
+    pointer SchemeFFI::symbol_pointer(scheme* _sc, pointer args)
+    {
+	void* library = cptr_value(pair_car(args));
+	char* symname = string_value(pair_cadr(args));
+		
+#ifdef TARGET_OS_WINDOWS
+        void* ptr = (void*) GetProcAddress((HMODULE)library, symname);
+#else
+	void* ptr = dlsym(library, symname);
+#endif
+	if(!ptr) {
+	    return _sc->F;
+	}
+	return mk_cptr(_sc,ptr);
+    }
 	
     pointer SchemeFFI::bind_symbol(scheme* _sc, pointer args)
     {
@@ -2730,8 +2773,8 @@ namespace extemp {
 	char* n = string_value(pair_car(args));
 	char nk[256];
 	char* name = nk;
-	strcpy(name,n);
-	if (name[0] == '%') name = name++;	
+	strcpy(name,n);        
+	if (name[0] == '%') name = name+1;	
 
 	int ptrdepth = 0;
 	while(name[strlen(name)-1] == '*') {
@@ -2783,6 +2826,12 @@ namespace extemp {
 	AudioDevice::I()->setDSPClosure(cptr_value(pair_car(args)));
 	return _sc->T;
     }
+
+    pointer SchemeFFI::setDSPMTClosure(scheme* _sc, pointer args)
+    {
+      AudioDevice::I()->setDSPMTClosure(cptr_value(pair_car(args)),ivalue(pair_cadr(args)));
+	return _sc->T;
+    }
 	
     pointer SchemeFFI::setDSPWrapper(scheme* _sc, pointer args)
     {
@@ -2796,6 +2845,25 @@ namespace extemp {
 	return _sc->T;
     }
 
+    pointer SchemeFFI::setDSPMTWrapper(scheme* _sc, pointer args)
+    {
+      AudioDevice::I()->setDSPMTWrapper((dsp_f_ptr_sum)cptr_value(pair_car(args)),
+                                         (dsp_f_ptr)cptr_value(pair_cadr(args)));
+      return _sc->T;
+    }
+
+    pointer SchemeFFI::initMTAudio(scheme* _sc, pointer args)
+    {
+      AudioDevice::I()->initMTAudio(ivalue(pair_car(args)));
+      return _sc->T;
+    }
+
+    pointer SchemeFFI::getAudioLoad(scheme* _sc, pointer args)
+    {
+      double load = AudioDevice::getCPULoad();
+      return mk_real(_sc,load);
+    }
+  
 
   ////////////////////////////////////////////////////////////////
   //  SOME XWindows guff

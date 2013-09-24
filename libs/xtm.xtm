@@ -15,10 +15,7 @@
 ;; (sys:load "libs/external/openvg.xtm")
 ;; (sys:load "libs/external/drawtext.xtm")
 ;; (println 'done 'loading!)
-
-;; ;; ;; then export the module to bitcode
-
-;; (llvm-export-current-xtlang-module)
+;; (llvm-export-current-xtlang-module "xtm")
 
 ;; ;; Then compile bitcode into a shared lib
 
@@ -221,10 +218,14 @@
 (sys:load "libs/core/pc_ivl.xtm")
 
 (sys:load-preload-check 'audio-inst-ext)
+;; set *all* audio lib symbols
+(define *xtmlib-audio-dsp-loaded* #f)
+(define *xtmlib-audio-inst-loaded* #f)
 (define *xtmlib-audio-inst-ext-loaded* #f)
 (print "Loading audio library...       ")
 
 (bind-alias DSP [double,double,double,double,double*]*)
+(bind-alias DSPMT [double,double*,double,double,double*]*)
 
 ;; bind vals in library
 (bind-lib-val stdlib SAMPLERATE double)
@@ -271,8 +272,6 @@
 (bind-lib-func stdlib print_audio_state [i32]*)
 (bind-wrapper print-audio-state print_audio_state)
 ;; (print-audio-state)
-
-
 
 ;; ;; (dirty) check to see if audio_dsp.xtm has already been loaded
 ;; (if (not (llvm:get-globalvar "SAMPLERATE"))
@@ -335,6 +334,7 @@
 (bind-lib-func stdlib delay_old_c [[double,double]*,i64]*)
 (bind-lib-func stdlib delay_c [[double,double,double,double]*,double]*)
 (bind-lib-func stdlib delay_mc_c [[double,double,double,double,double]*,i64,double]*)
+(bind-lib-func stdlib delay_st_c [[double,double,double,double,double]*,double,double]*)
 (bind-lib-func stdlib delay_t_c [[double,double,double,double,double]*,double,double]*)
 (bind-lib-func stdlib delay_t_mc_c [[double,double,double,double,double,double]*,i64,double,double]*)
 (bind-lib-func stdlib delay_t_st_c [[double,double,double,double,double,double]*,double,double,double]*)
@@ -430,6 +430,9 @@
 (bind-lib-func stdlib subbass_note_c [[double,double,double,double,double]*,i64,double*]*)
 (bind-lib-func stdlib subbass_fx [double,double,double,double,double*]* 100000)
 (bind-lib-func stdlib subbass [double,double,double,double,double*]*)
+(bind-lib-func stdlib sawlead_note_c [[double,double,double,double,double]*,i64,double*]*)
+(bind-lib-func stdlib sawlead_fx [double,double,double,double,double*]* 1000000)
+(bind-lib-func stdlib sawlead [double,double,double,double,double*]*)
 (bind-lib-func stdlib sf_frames [i64,sf_info*]*)
 (bind-lib-func stdlib sf_samplerate [i64,sf_info*]*)
 (bind-lib-func stdlib sf_channels [i64,sf_info*]*)
@@ -664,7 +667,7 @@
         (parser (if (> (length args) 1) (cadr args) 'parse-sample-names-1))
         (midioffset (if (> (length args) 2) (caddr args) 0)))
     `(let ((cnt 0)
-           (file-list (sys:directory-list ,path)))
+           (file-list (sys:directory-list ,(sys:expand-path path))))
        (for-each (lambda (samp-data)
                    (if samp-data
                        (begin
@@ -672,7 +675,7 @@
                          (set-sampler-index ,sampler
                                             (if (string=? (sys:platform) "Windows")
                                                 (car samp-data)
-                                                (string-append ,path "/" (car samp-data)))
+                                                (string-append ,(sys:expand-path path) "/" (car samp-data)))
                                             (+ ,midioffset (cadr samp-data))
                                             (caddr samp-data)
                                             (cadddr samp-data)
@@ -701,6 +704,7 @@
 
 (define ipc:audio-setup
   (lambda (proc)
+    (ipc:load proc "libs/core/pc_ivl.xtm")
     (ipc:eval-string proc
                      ";; new playnote
                      (define play-note
@@ -723,6 +727,89 @@
                                            nargs
                                            dargs)
                                (print-error 'No 'inst 'named (symbol->string inst))))))
+                     ;; load sampler                     
+                     (define-macro (load-sampler sampler path . args)
+                       (let ((bank (if (> (length args) 0) (car args) 0))
+                             (parser (if (> (length args) 1) (cadr args) 'parse-sample-names-1))
+                             (midioffset (if (> (length args) 2) (caddr args) 0)))
+                         `(let ((cnt 0)
+                                (file-list (sys:directory-list ,(sys:expand-path path))))
+                            (for-each (lambda (samp-data)
+                                        (if samp-data
+                                            (begin
+                                              (set! cnt (+ cnt 1))                         
+                                              (set-sampler-index ,sampler
+                                                                 (if (string=? (sys:platform) \"Windows\")
+                                                                     (car samp-data)
+                                                                     (string-append ,(sys:expand-path path) \"/\" (car samp-data)))
+                                                                 (+ ,midioffset (cadr samp-data))
+                                                                 (caddr samp-data)
+                                                                 (cadddr samp-data)
+                                                                 ,bank
+                                                                 0))))
+                                      (,parser file-list))
+                            (ascii-print-color 0 6 10)              
+                            (print 'Loaded cnt 'files 'into 'bank#: ,bank)
+                            (ascii-print-color 0 7 10)       
+                            (println)
+                            )))
+                     ;; clear sampler
+                     (define-macro (clear-sampler sampler . args)
+                       (let ((bank (if (> (length args) 0) (car args) 0)))
+                         `(let ((native (llvm:get-native-closure ,(symbol->string sampler)))
+                                (cnt 0))
+                            (dotimes (i 128)
+                              (if (> (clear_sample_data_ native (real->integer i) (real->integer ,bank)) 0)
+                                  (set! cnt (+ cnt 1))))
+                            (ascii-print-color 0 6 10)              
+                            (print 'Cleared cnt 'slots 'from 'bank#: ,bank)
+                            (ascii-print-color 0 7 10)
+                            (println)
+                            #t)))
+                     ;; set sampler index
+                     (define-macro (set-sampler-index inst fname index offset lgth bank print?)
+                       `(let ((native (llvm:get-native-closure ,(symbol->string inst))))
+                          (if (and (cptr? native)
+                                   (> ,index 0)
+                                   (< ,index 128))
+                              (set_sample_data_ native
+                                                ,fname
+                                                (real->integer ,index)
+                                                (real->integer ,offset)
+                                                (real->integer ,lgth)
+                                                (real->integer ,bank)
+                                                ,(if (> print? 0) 1 0)))))
+                     ;; this will match e.g. 60.aiff (where 60 is the midi note number)
+                     (define parse-sample-names-1
+                       (lambda (file-list)
+                         (map (lambda (fname)
+                                (let ((result (regex:matched fname \"([0-9]*)\.(wav|WAV|aif|AIF|aiff|AIFF|ogg|OGG)$\")))
+                                  (if (null? result)
+                                      (begin (if (not (regex:match? fname \"^\\.\"))
+                                                 (println 'Error: 'cannot 'parse 'filename: fname))
+                                             #f)
+                                      (list fname                          ; filename    
+                                            (string->number (cadr result)) ; midi note number
+                                            0                              ; offset
+                                            0))))                          ; length (0 for whole sample)
+                              file-list)))
+                     ;; this will match e.g. Eb3.aiff (representing E flat 3)
+                     (define parse-sample-names-2
+                       (lambda (file-list)
+                         (map (lambda (fname)
+                                (let ((result (regex:matched fname \"^.*([abcdefgABCDEFG][#b]?[0-9]).*\.(wav|WAV|aif|AIF|aiff|AIFF|ogg|OGG)$\")))
+                                  (if (null? result)
+                                      (begin
+                                        (if (not (regex:match? fname \"^\\.\"))
+                                            (begin
+                                              (println 'Error: 'cannot 'parse 'filename: fname)
+                                              (println 'Regex-result: result)))
+                                        #f)
+                                      (list fname                                    ; filename                   
+                                            (note-name-to-midi-number (cadr result)) ; midi note number           
+                                            0                                        ; offset                     
+                                            0))))                                    ; length (0 for whole sample)
+                              file-list)))
                      ;; note name to midi num
                      (define note-name-to-midi-number
                        (lambda (name)
@@ -744,6 +831,8 @@
                                 `(play-note (*metro* (+ beat ,(cadr args))) ,(caddr args) ,(cadddr args) ,(car (cddddr args))
                                             (*metro* 'dur ,(car (cdr (cddddr args))))
                                             ,@(cddr (cddddr args)))))")
+    (ipc:bind-func proc 'set_sample_data_)
+    (ipc:bind-func proc 'clear_sample_data_)
     (ipc:bind-func proc '_play_note)
     (ipc:bind-func proc 'midi2frq)))
 
@@ -751,11 +840,54 @@
 ;;;;;;;
 ;; setup some instrument parameters
 
+(sampler_fx.wet .025)
+(sampler1_fx.wet .025)
+(sampler2_fx.wet .025)
+(sampler3_fx.wet .025)
+
 (subbass.attack 500.0)
 (subbass.decay 500.0)
 (subbass.sustain 0.8)
 (subbass.release 500.0)
 
+(sawlead.attack 40.0)
+(sawlead.decay 120.0)
+(sawlead.release 400.0)
+(sawlead.sustain 0.75)
+
+(bind-func dsp:DSP
+  (lambda (in time chan dat)
+    (+ (fmsynth in time chan dat)
+       (subbass in time chan dat)
+       (sawlead in time chan dat)
+       (sampler in time chan dat))))
+
+
+(define xtm_audio_setup
+  (lambda ()
+    (ipc:audio-setup "utility")
+    (ipc:bind-func "utility" 'fmsynth)
+    (ipc:bind-func "utility" 'sawlead)
+    (ipc:bind-func "utility" 'subbass)    
+    (ipc:bind-func "utility" 'sampler)
+    (ipc:bind-func "utility" 'fmsynth_fx)
+    (ipc:bind-func "utility" 'sawlead_fx)
+    (ipc:bind-func "utility" 'subbass_fx)    
+    (ipc:bind-func "utility" 'sampler_fx)
+    (dsp:set! dsp)
+    (ascii-print-color 0 6 10)
+    (print "Default Audio Initalized\n")
+    (print "instruments: fmsynth, subbass, sawlead and sampler\n")
+    (print "defined  in: 'primary' & 'utility'\n")
+    (ascii-print-color 0 7 10)
+    (println)))
+
+;; load pc ivl library 
+(load "libs/core/pc_ivl.xtm")
+
+;; set *all* audio lib symbols
+(define *xtmlib-audio-dsp-loaded* #t)
+(define *xtmlib-audio-inst-loaded* #t)
 (define *xtmlib-audio-inst-ext-loaded* #t)
 (ascii-print-color 0 2 10)
 (print "[YES]")
@@ -919,7 +1051,8 @@
       (bind-lib libgl glBindRenderbuffer [void,i32,i32]*)
       (bind-lib libgl glRenderbufferStorage [void,i32,i32,i32,i32]*)
       (bind-lib libgl glFramebufferRenderbuffer [void,i32,i32,i32,i32]*)
-      (bind-lib libgl glFramebufferTexture [void,i32,i32,i32,i32]*)
+      (if (sys:symbol-cptr libgl "glFramebufferTexture")
+          (bind-lib libgl glFramebufferTexture [void,i32,i32,i32,i32]*))
       (bind-lib libgl glFramebufferTexture1D [void,i32,i32,i32,i32,i32]*)
       (bind-lib libgl glFramebufferTexture2D [void,i32,i32,i32,i32,i32]*)
       (bind-lib libgl glFramebufferTexture3D [void,i32,i32,i32,i32,i32,i32]*)
@@ -2043,7 +2176,7 @@ void main()
 
 (define libassimp
   (let ((platform (sys:platform)))
-    (cond ((string=? platform "Linux") (sys:open-dylib "libassimp.so"))
+    (cond ((string=? platform "Linux") (sys:open-dylib "libassimp.so.3"))
           ((string=? platform "Windows") (sys:open-dylib "libassimp.dll"))
           ((string=? platform "OSX") (sys:open-dylib "libassimp.dylib"))
           (else (print "Unknown platform: " platform)))))
@@ -2599,7 +2732,7 @@ void main()
 ;; image
 (bind-lib libopenvg vgCreateImage [i8*,i32,i32,i32,i32]*)
 (bind-lib libopenvg vgDestroyImage [void,i8*]*)
-(bind-lib libopenvg vgImageSubData [void,i8*,i8*,i32,i32,i32,i32,i32,i32]*)
+(bind-lib libopenvg vgImageSubData [void,i8*,i8*,i32,i32,i32,i32,i32,i32,i32]*)
 (bind-lib libopenvg vgGetImageSubData [void,i8*,i8*,i32,i32,i32,i32,i32,i32]*)
 (bind-lib libopenvg vgChildImage [i8*,i8*,i32,i32,i32,i32]*)
 (bind-lib libopenvg vgGetParent [i8*,i8*]*)
@@ -2643,9 +2776,52 @@ void main()
 (bind-lib libopenvg vguComputeWarpSquareToQuad [i32,float,float,float,float,float,float,float,float,float*]*)
 (bind-lib libopenvg vguComputeWarpQuadToQuad [i32,float,float,float,float,float,float,float,float,float,float,float,float,float,float,float,float,float*]*)
 
-(bind-lib-func stdlib vgCreateContext [i32,i32,i32]*)
+(bind-alias xtm_colour |4,VGfloat|)
+(bind-alias xtm_color xtm_colour)
+
+(bind-lib-func stdlib xtm_vg_error_string [i8*,i32]*)
+(bind-lib-func stdlib xtm_vg_print_error [i32]*)
+(bind-lib-func stdlib xtm_create_vg_context [i32,i32,i32]*)
+(bind-lib-func stdlib xtm_vg_setup [void]*)
 (bind-lib-func stdlib xtm_create_vgpath [i8*]*)
-(bind-lib-func stdlib xtm_create_vgimage [i8*,i8*]*)
+(bind-lib-func stdlib xtm_vg_clear_rect [void,float,float,float,float,i32,i32,i32,i32]*)
+(bind-lib-func stdlib xtm_vg_clear [void,float,float,float,float,i32,i32]*)
+(bind-lib-func stdlib xtm_paint_setup [void,i8*,float,float,float,float]*)
+(bind-lib-func stdlib xtm_paint_setup_stroke [void,i8*,float,float,float,float,float]*)
+(bind-lib-func stdlib xtm_paint_setup_fill [void,i8*,float,float,float,float]*)
+(bind-lib-func stdlib xtm_destroy_paint [void,i8*]*)
+(bind-lib-func stdlib xtm_draw_path_keep [void,i8*]*)
+(bind-lib-func stdlib xtm_draw_path [void,i8*]*)
+(bind-lib-func stdlib xtm_destroy_path [void,i8*]*)
+(bind-lib-func stdlib xtm_stroke_path_keep [void,i8*]*)
+(bind-lib-func stdlib xtm_stroke_path [void,i8*]*)
+(bind-lib-func stdlib xtm_fill_path_keep [void,i8*]*)
+(bind-lib-func stdlib xtm_fill_path [void,i8*]*)
+(bind-lib-func stdlib xtm_draw_line [void,float,float,float,float]*)
+(bind-lib-func stdlib xtm_draw_polygon [void,float*,i32,i32]*)
+(bind-lib-func stdlib xtm_draw_rect [void,float,float,float,float]*)
+(bind-lib-func stdlib xtm_draw_round_rect [void,float,float,float,float,float,float]*)
+(bind-lib-func stdlib xtm_draw_ellipse [void,float,float,float,float]*)
+(bind-lib-func stdlib xtm_draw_arc [void,float,float,float,float,float,float,i32]*)
+(bind-lib-func stdlib xtm_add_line [i32,i8*,float,float,float,float]*)
+(bind-lib-func stdlib xtm_add_polygon [i32,i8*,float*,i32,i32]*)
+(bind-lib-func stdlib xtm_add_rect [i32,i8*,float,float,float,float]*)
+(bind-lib-func stdlib xtm_add_round_rect [i32,i8*,float,float,float,float,float,float]*)
+(bind-lib-func stdlib xtm_add_ellipse [i32,i8*,float,float,float,float]*)
+(bind-lib-func stdlib xtm_add_arc [i32,i8*,float,float,float,float,float,float,i32]*)
+(bind-lib-func stdlib xtm_create_vgimage [i8*,i32,i32]*)
+(bind-lib-func stdlib xtm_destroy_vgimage [void,i8*]*)
+(bind-lib-func stdlib xtm_set_vgimage_subdata [void,i8*,i8*,i32,i32,i32,i32,i32]*)
+(bind-lib-func stdlib xtm_load_vgimage [i8*,i8*]*)
+(bind-lib-func stdlib xtm_set_color32 [i8,i8*,double,double,double,double]*)
+(bind-lib-func stdlib xtm_color32_red [double,i8*]*)
+(bind-lib-func stdlib xtm_set_color32_red [i8,i8*,double]*)
+(bind-lib-func stdlib xtm_color32_green [double,i8*]*)
+(bind-lib-func stdlib xtm_set_color32_green [i8,i8*,double]*)
+(bind-lib-func stdlib xtm_color32_blue [double,i8*]*)
+(bind-lib-func stdlib xtm_set_color32_blue [i8,i8*,double]*)
+(bind-lib-func stdlib xtm_color32_alpha [double,i8*]*)
+(bind-lib-func stdlib xtm_set_color32_alpha [i8,i8*,double]*)
 
 (define *xtmlib-openvg-loaded* #t)
 (ascii-print-color 0 2 10)

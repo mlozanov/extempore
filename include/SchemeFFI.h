@@ -92,10 +92,15 @@ namespace extemp {
 	static pointer platform(scheme* _sc, pointer args);
 	static pointer makeCptr(scheme* _sc, pointer args);
 	static pointer dirlist(scheme* _sc, pointer args);
+        static pointer pathExpansion(scheme* _sc, pointer args);
 	// dsp bits
 	static pointer setDSPClosure(scheme* _sc, pointer args);
+	static pointer setDSPMTClosure(scheme* _sc, pointer args);
 	static pointer setDSPWrapper(scheme* _sc, pointer args);
+	static pointer setDSPMTWrapper(scheme* _sc, pointer args);
 	static pointer setDSPWrapperArray(scheme* _sc, pointer args);
+        static pointer initMTAudio(scheme* _sc, pointer args);
+        static pointer getAudioLoad(scheme* _sc, pointer args);
 		
 	// misc stuff
 	static pointer dataGETi64(scheme* _sc, pointer args);
@@ -169,6 +174,7 @@ namespace extemp {
 	static pointer callClosure(scheme* _sc, pointer args);
 	static pointer printLLVMModule(scheme* _sc, pointer args);
 	static pointer printLLVMFunction(scheme* _sc, pointer args);
+	static pointer symbol_pointer(scheme* _sc, pointer args);
 	static pointer bind_symbol(scheme* _sc, pointer args);
 	static pointer get_named_type(scheme* _sc, pointer args);
         static pointer export_llvmmodule_bitcode(scheme* _sc, pointer args);

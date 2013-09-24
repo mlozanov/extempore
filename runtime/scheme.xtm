@@ -1137,7 +1137,7 @@
 
 ;; this for buffered version
 (define _dsp:set!
-   (lambda (name)
+   (lambda (name . args)
       (let* ((nn (if (symbol? name) (symbol->string name) name))
 	     (ft (llvm:get-function-args-withoutzone nn))
 	     (ct (if ft
@@ -1157,10 +1157,26 @@
 				 (+ *impc:ir:double* *impc:ir:pointer*))) ;; sample by sample form FX
 		(sys:set-dsp-wrapper (llvm:get-function-pointer "imp_dsp_wrapper"))
 		(sys:set-dsp-closure (llvm:get-function-pointer (string-append nn "_getter")))) ;; whole buffer
+	       ((equal? ct (list *impc:ir:double*
+				 (+ *impc:ir:double* *impc:ir:pointer*)
+				 *impc:ir:double*
+				 *impc:ir:double*
+				 (+ *impc:ir:double* *impc:ir:pointer*))) ;; sample by sample form FX
+		(sys:set-dspmt-wrapper (llvm:get-function-pointer "imp_dsp_sum_wrapper")
+                                       (llvm:get-function-pointer "imp_dsp_wrapper"))
+                (sys:set-dsp-closure (llvm:get-function-pointer (string-append nn "_getter")))
+                (dotimes (i (length args))                  
+                  (sys:set-dspmt-closure (llvm:get-function-pointer (string-append (list-ref args i) "_getter")) i))
+                (sys:init-mt-audio (length args))
+                )
 	       (else (print-error 'Bad 'closure 'signature 'for 'dsp:set! ct))))))
 
 (define-macro (dsp:set! name)
   `(_dsp:set! ,(symbol->string name)))
+
+(define-macro (dsp:set! . names)
+  (let ((lst (map (lambda (n) (symbol->string n)) names)))
+    `(_dsp:set! ,@lst)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; library-loading helpers ;;
@@ -1688,12 +1704,23 @@
 ;; llvm module export helper
 
 (define llvm-export-current-xtlang-module
-  (lambda ()
-    (llvm:export-module "/tmp/xtlang-module.bc")
-    ;; print further instructions
-    (print "\nLLVM bitcode for the xtlang standard library exported to \"/tmp/xtlang-module.bc\". To finish compiling the stdlib, enter the following command in a terminal window (inserting the proper path to your LLVM install):\n\n")
-    (cond ((string=? (sys:platform) "Linux")
-	   (print "/path/to/llvm-3.2/Release/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtlang-module.bc && gcc --shared -g /tmp/xtlang-module.s -o ./xtlang-module.so\n"))
-	  ((string=? (sys:platform) "OSX")
-	   (print "/path/to/llvm-3.2/bin/llc -O3 -relocation-model=pic -tailcallopt /tmp/xtlang-module.bc && clang -O3 -dynamiclib -undefined dynamic_lookup /tmp/xtlang-module.s -o ./xtlang-module.dylib\n"))
-	  (else (print "Sorry, cannot find the appropriate compilation command for your platform at this time.")))))
+  (lambda args
+    (let* ((basename (if (null? args) "xtlang-module" (car args)))
+           (bitcode-file (string-append "/tmp/" basename ".bc"))
+           (asm-file (string-append "/tmp/" basename ".s"))
+           (shared-lib-file
+            (cond ((string=? (sys:platform) "Linux")
+             (string-append "./" basename ".so"))
+            ((string=? (sys:platform) "OSX")
+             (string-append "./" basename ".dylib"))
+            ((string=? (sys:platform) "Windows")
+             (string-append "./" basename ".dll"))
+            (else ""))))
+      (llvm:export-module bitcode-file)
+      ;; print further instructions
+      (print "\nLLVM bitcode for the current xtlang module exported to" bitcode-file "\nTo finish compiling, enter the following command in a terminal window (inserting the proper path to your LLVM install):\n\n")
+      (cond ((string=? (sys:platform) "Linux")
+             (print "/path/to/llvm/3.2/bin/llc -O3 -relocation-model=pic -tailcallopt" bitcode-file "&& gcc --shared -g" asm-file "-o" shared-lib-file "\n"))
+            ((string=? (sys:platform) "OSX")
+             (print "/path/to/llvm/3.2/bin/llc -O3 -relocation-model=pic -tailcallopt" bitcode-file "&& clang -O3 -dynamiclib -undefined dynamic_lookup" asm-file "-o" shared-lib-file "\n"))
+            (else (print "Sorry, cannot find the appropriate compilation command for your platform at this time."))))))

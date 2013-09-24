@@ -4099,7 +4099,16 @@ static pointer opexe_0(scheme *sc, enum scheme_opcodes op) {
 	sc->args = cons(sc, sc->value, sc->args);
 	if (is_pair(sc->code)) { /* continue */
 	    s_save(sc,OP_LET1, sc->args, cdr(sc->code));
-	    sc->code = cadar(sc->code);
+            //sorensen replaced this:
+	    //sc->code = cadar(sc->code);
+
+            // with this:
+            sc->code = car(sc->code);
+            if(!is_pair(sc->code))
+              Error_0(sc,"Scm Error: Poorly formed let!", sc->code->_size);
+            sc->code = cadr(sc->code);
+            ////////////////////
+
 	    sc->args = sc->NIL;
 	    s_goto(sc,OP_EVAL);
 	} else {  /* end */
@@ -4116,14 +4125,16 @@ static pointer opexe_0(scheme *sc, enum scheme_opcodes op) {
 	    new_slot_in_env(sc, caar(x), car(y)); 
 	}
 	if (is_symbol(car(sc->code))) {    /* named let */
-	    for (x = cadr(sc->code), sc->args = sc->NIL; x != sc->NIL; x = cdr(x)) {
-			
-		sc->args = cons(sc, caar(x), sc->args);
-	    }
-	    x = mk_closure(sc, cons(sc, reverse_in_place(sc, sc->NIL, sc->args), cddr(sc->code)), sc->envir); 
-	    new_slot_in_env(sc, car(sc->code), x); 
-	    sc->code = cddr(sc->code);
-	    sc->args = sc->NIL;
+          if(!is_pair(cadr(sc->code))) {
+            Error_0(sc,"Scm Error: Poorly formed named let!", sc->code->_size);
+          }
+          for (x = cadr(sc->code), sc->args = sc->NIL; x != sc->NIL; x = cdr(x)) {
+            sc->args = cons(sc, caar(x), sc->args);
+          }
+          x = mk_closure(sc, cons(sc, reverse_in_place(sc, sc->NIL, sc->args), cddr(sc->code)), sc->envir); 
+          new_slot_in_env(sc, car(sc->code), x); 
+          sc->code = cddr(sc->code);
+          sc->args = sc->NIL;
 	} else {
 	    sc->code = cdr(sc->code);
 	    sc->args = sc->NIL;

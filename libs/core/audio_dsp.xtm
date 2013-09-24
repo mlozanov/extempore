@@ -44,6 +44,7 @@
     (bind-val FRAMES i64 *au:block-size*))
 
 (bind-alias DSP [double,double,double,double,double*]*)
+(bind-alias DSPMT [double,double*,double,double,double*]*)
 
 (bind-func print_audio_state
   (lambda ()
@@ -385,6 +386,16 @@
 	(let ((dlines:[double,double,double,double]** (alloc channels))
 	      (i:i64 0))
 	  (dotimes (i channels) (pset! dlines i (delay_c max_delay)))
+	  (lambda (chan x wet feedback)
+	    ((pref dlines (dtoi32 chan)) x wet feedback))))))
+
+(if *build-multi-chan*
+    (bind-func delay_st_c
+      (lambda (d1 d2)
+	(let ((dlines:[double,double,double,double]** (alloc 2))
+	      (i:i64 0))
+	  (pset! dlines 0 (delay_c d1))
+	  (pset! dlines 1 (delay_c d2))
 	  (lambda (chan x wet feedback)
 	    ((pref dlines (dtoi32 chan)) x wet feedback))))))
 
