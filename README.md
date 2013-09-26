@@ -46,7 +46,7 @@ You can also join the Extempore community:
 
 # Installation on Linux & OS X
 
-_More detailed instructions can be found at_ http://benswift.me/2012-11-06-building-extempore-on-osx-linux.html
+_More detailed instructions can be found_ [here](http://benswift.me/2013-03-20-building-extempore-on-osx-linux.html)
 
 Building Extempore depends on the following libraries (you can
 probably get them through your favourite package manager).
@@ -101,7 +101,8 @@ Voila... you should be done.
 
 # Installation on Windows 7
 
-_More detailed instructions can be found at_ http://benswift.me/2012-11-05-building-extempore-on-windows.html
+_More detailed instructions can be found_
+[here](http://benswift.me/2013-03-20-building-extempore-on-windows.html)
 
 Extempore has thus far only been tested on Windows 7 64-bit, but if you
 can get it to build/run on other flavours of Windows then do let us
@@ -210,7 +211,8 @@ editors.
 There are some optional command line options that you may want to use
 you can get a list by running `./extempore --help`
 
-For more detail, see this post on [interacting with the Exempore compiler](http://benswift.me/2012-09-26-interacting-with-the-extempore-compiler.html).
+For more detail, see this post on
+[interacting with the Exempore compiler](http://benswift.me/2012-09-26-interacting-with-the-extempore-compiler.html).
 
 **Telnet**
 
@@ -242,6 +244,34 @@ eval the region
 *Windows note*: if you choose to use emacs on windows (recommended)
 and run extempore in a `shell` or `eshell` then you should
 set `--term ansi` as an option when starting extempore.
+
+**Sublime Text**
+
+You'll need the
+[ST2 Extempore plugin](https://github.com/benswift/extempore-sublime),
+which provides syntax highlighting and some commands for connecting to
+and working with a running Extempore process. To install the plugin,
+download the
+[plugin files](https://github.com/benswift/extempore-sublime/zipball/master)
+(or clone the repo) and unzip them into your
+[ST2 packages directory](http://docs.sublimetext.info/en/latest/basic_concepts.html#the-packages-directory).
+
+Then, to to start hacking on Extempore code in ST2:
+
+1. open up your favourite shell (e.g. `Terminal.app` on OS X or
+   `cmd.exe` on Windows)
+2. start Extempore: `cd` into your Extempore directory and run
+   `./extempore`
+3. in ST2, open an Extempore file (the Extempore plugin should be
+   loaded automatically when ST2 sees the `.xtm` file extension)
+4. connect to the running Extempore process (`ctrl+x, ctrl+y`)
+
+Then, to evaluate Extempore code, highlight the code you want to
+evaluate and hit `extempore_evaluate` (which by default is mapped to
+`ctrl+x ctrl+x`).
+
+To restart the Extempore process, just `ctrl+c` in the shell where
+`extempore` is running to kill it, then start it up again.
 
 **Vim**
 
