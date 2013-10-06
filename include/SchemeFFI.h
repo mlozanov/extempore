@@ -83,6 +83,8 @@ namespace extemp {
 	static pointer rationalToReal(scheme* _sc, pointer args);
 	static pointer realToRational(scheme* _sc, pointer args);
 	static pointer realToInteger(scheme* _sc, pointer args);
+	static pointer rationalToNumerator(scheme* _sc, pointer args);
+	static pointer rationalToDenominator(scheme* _sc, pointer args);
 		
 	// sys stuff
 	static pointer openDynamicLib(scheme* _sc, pointer args);
@@ -99,7 +101,9 @@ namespace extemp {
 	static pointer setDSPWrapper(scheme* _sc, pointer args);
 	static pointer setDSPMTWrapper(scheme* _sc, pointer args);
 	static pointer setDSPWrapperArray(scheme* _sc, pointer args);
+	static pointer setDSPMTWrapperArray(scheme* _sc, pointer args);
         static pointer initMTAudio(scheme* _sc, pointer args);
+        static pointer initMTAudioBuf(scheme* _sc, pointer args);
         static pointer getAudioLoad(scheme* _sc, pointer args);
 		
 	// misc stuff
